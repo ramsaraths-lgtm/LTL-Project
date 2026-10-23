@@ -37,3 +37,7 @@ No environment variables or database are required for this homepage.
 ## Notes
 - Teaching, Notes, Quiz, and Test are UI selections only at this stage. They do not yet contain real lesson/question data.
 - Fonts load from Google Fonts; the site uses fallback fonts if unavailable.
+
+
+## Important: GitHub/Vercel file extension
+Keep the React component filename exactly `src/App.tsx` (including `.tsx`). Do not name it `src/App` or `src/App.js`. The entry point imports `./App.tsx`. If an extensionless `src/App` file already exists in GitHub, delete it and upload this project's `src/App.tsx`.
