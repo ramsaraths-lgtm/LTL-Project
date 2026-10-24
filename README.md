@@ -1,38 +1,53 @@
-# LTL – Live To Learn (Phase 2)
+# LTL – Live To Learn (Phase 3)
 
-A responsive React + TypeScript + Vite frontend for a competitive-exam learning website.
+Responsive React + TypeScript + Vite frontend with Supabase authentication, admin content management, PDF notes/video uploads, quiz/test question authoring, a text-based PDF question scanner, and an About page.
 
-## Phase 2 flow
+## Phase 3 features
 
-1. Home page → **Find your exam**
-2. Separate exam-selection page → **TNPSC / RRB / SSC**
-3. Separate learning-mode page → **Teaching / Notes / Quiz / Test**
-4. Separate subject-selection page → subjects tailored to the selected exam
-5. Profile page → editable guest display name and learning goal (authentication is intentionally deferred to the final phase)
+- Email/password sign-up and sign-in through Supabase Auth.
+- Admin access is determined by `public.profiles.role = 'admin'`; hiding the admin page is not the security boundary. Database/storage Row Level Security policies are included.
+- Admin-only training video uploads and PDF notes uploads to Supabase Storage.
+- Quiz/Test authoring with two options: automatic extraction of selectable PDF text, or manual question entry with four options and correct answer.
+- Scanner lets admin review detected questions and choose the answer before publishing. It does not infer correct answers. Image-only scanned PDFs need OCR and are not automatically parsed in this version.
+- Learners can browse published training videos, PDFs, and quiz/test questions by exam and subject. Questions are currently visible to signed-in users.
+- About page with Founder & CEO and Developer details.
 
-### Subject categories currently included
+## 1. Configure Supabase
 
-- **TNPSC:** General Tamil, General English, General Studies, Aptitude & Mental Ability, Current Affairs
-- **RRB:** Mathematics, General Intelligence & Reasoning, General Science, General Awareness & Current Affairs
-- **SSC:** General Intelligence & Reasoning, General Awareness, Quantitative Aptitude, English Comprehension, Computer Knowledge
+1. Create a project at https://supabase.com/.
+2. In Project Settings > API, copy the Project URL and publishable/anon key.
+3. Copy `.env.example` to `.env.local` and fill:
 
-These are broad subject categories and can be adjusted to match a specific TNPSC/RRB/SSC exam notification and level.
+   ```env
+   VITE_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co
+   VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_PUBLISHABLE_OR_ANON_KEY
+   ```
 
-## Run locally
+4. Open Supabase Dashboard > SQL Editor and run `supabase-setup.sql`.
+5. Sign up in LTL with the email that should be the administrator.
+6. In Supabase SQL Editor, run the final promotion query from `supabase-setup.sql`, replacing `YOUR_ADMIN_EMAIL` with that account's email. This is a privileged action; never allow normal users to change their own role.
+7. Check Storage for buckets `ltl-videos` and `ltl-notes`. The SQL creates public-read buckets with admin-only uploads. Public-read means anyone with a file URL may access uploaded files; switch to private buckets and signed URLs if materials should be restricted.
+
+## 2. Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Production build
+## 3. Deploy on Vercel
 
-```bash
-npm run build
-```
+- Framework preset: Vite
+- Build command: `npm run build`
+- Output directory: `dist`
+- Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under Project Settings > Environment Variables for Production, Preview and Development as needed.
+- Redeploy after setting environment variables.
 
-Vercel settings: Framework Preset **Vite**, Build Command `npm run build`, Output Directory `dist`.
+The anon/publishable key is designed for frontend use with RLS enabled. Never put a Supabase service-role key in this frontend project.
 
-## Important scope note
+## Important notes
 
-This phase includes the page navigation, exam-specific subject lists, subject search/selection, and a guest profile UI. Teaching lessons, notes, quiz questions, tests, backend persistence, and login/authentication are not connected yet; those can be added in later phases.
+- PDF scanner uses `pdfjs-dist` to extract selectable text from PDF pages and applies common multiple-choice patterns. It is not OCR; scanned image PDFs need OCR. Review all extracted questions/options before publishing.
+- Question correct answers are currently readable by signed-in users because the quiz client checks answers in-browser. For high-stakes exams, store answer keys separately and validate answers server-side.
+- The upload SQL allows public file reads. Do not upload copyrighted/private materials unless you have permission and are comfortable with this access model.
+- Exam subjects are starter categories and should be adapted to each exam notification.
