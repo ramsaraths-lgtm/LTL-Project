@@ -63,6 +63,10 @@ drop policy if exists "Admins can publish questions" on public.ltl_questions;
 create policy "Admins can publish questions" on public.ltl_questions for insert to authenticated with check (created_by = auth.uid() and exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
 drop policy if exists "Admins can manage questions" on public.ltl_questions;
 create policy "Admins can manage questions" on public.ltl_questions for delete to authenticated using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+drop policy if exists "Admins can update questions" on public.ltl_questions;
+create policy "Admins can update questions" on public.ltl_questions for update to authenticated
+using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'))
+with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
 
 -- Create two storage buckets: ltl-videos and ltl-notes. This example makes files publicly readable;
 -- only admins may upload/delete. For restricted videos, use private buckets + signed URLs instead.
