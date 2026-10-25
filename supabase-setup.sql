@@ -84,3 +84,75 @@ create policy "Admins delete LTL files" on storage.objects for delete to authent
 
 -- IMPORTANT: after signing up your admin account, promote it from the SQL editor:
 -- update public.profiles set role = 'admin' where id = (select id from auth.users where email = 'YOUR_ADMIN_EMAIL');
+
+-- PHASE 5: allow admins to edit content records (not only upload/delete).
+drop policy if exists "Admins can update content" on public.ltl_content;
+create policy "Admins can update content" on public.ltl_content for update to authenticated
+using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'))
+with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin'));
+
+-- PHASE 5: chat schema for one-to-one and group conversations.
+create table if not exists public.ltl_chat_groups (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (length(trim(name)) between 2 and 60),
+  created_by uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.ltl_chat_members (
+  group_id uuid not null references public.ltl_chat_groups(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  joined_at timestamptz not null default now(),
+  primary key (group_id, user_id)
+);
+create table if not exists public.ltl_direct_messages (
+  id uuid primary key default gen_random_uuid(),
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  recipient_id uuid not null references auth.users(id) on delete cascade,
+  body text not null check (length(trim(body)) between 1 and 4000),
+  created_at timestamptz not null default now(),
+  check (sender_id <> recipient_id)
+);
+create table if not exists public.ltl_group_messages (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.ltl_chat_groups(id) on delete cascade,
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  body text not null check (length(trim(body)) between 1 and 4000),
+  created_at timestamptz not null default now()
+);
+
+alter table public.ltl_chat_groups enable row level security;
+alter table public.ltl_chat_members enable row level security;
+alter table public.ltl_direct_messages enable row level security;
+alter table public.ltl_group_messages enable row level security;
+
+-- Users can view registered profiles for the in-app people picker; only own profile fields are returned by UI.
+drop policy if exists "Authenticated users can discover learners" on public.profiles;
+create policy "Authenticated users can discover learners" on public.profiles for select to authenticated using (true);
+
+-- Group creation is authenticated. Creator is automatically added by the frontend after creating the group.
+drop policy if exists "Authenticated users can create groups" on public.ltl_chat_groups;
+create policy "Authenticated users can create groups" on public.ltl_chat_groups for insert to authenticated with check (created_by = auth.uid());
+drop policy if exists "Members can view their groups" on public.ltl_chat_groups;
+create policy "Members can view their groups" on public.ltl_chat_groups for select to authenticated using (
+  exists (select 1 from public.ltl_chat_members m where m.group_id = id and m.user_id = auth.uid())
+  or created_by = auth.uid()
+);
+drop policy if exists "Members can add themselves to groups" on public.ltl_chat_members;
+create policy "Members can add themselves to groups" on public.ltl_chat_members for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists "Members can view group membership" on public.ltl_chat_members;
+create policy "Members can view group membership" on public.ltl_chat_members for select to authenticated using (user_id = auth.uid());
+drop policy if exists "Members can read group messages" on public.ltl_group_messages;
+create policy "Members can read group messages" on public.ltl_group_messages for select to authenticated using (
+  exists (select 1 from public.ltl_chat_members m where m.group_id = ltl_group_messages.group_id and m.user_id = auth.uid())
+);
+drop policy if exists "Members can send group messages" on public.ltl_group_messages;
+create policy "Members can send group messages" on public.ltl_group_messages for insert to authenticated with check (
+  sender_id = auth.uid() and exists (select 1 from public.ltl_chat_members m where m.group_id = ltl_group_messages.group_id and m.user_id = auth.uid())
+);
+drop policy if exists "Participants can read direct messages" on public.ltl_direct_messages;
+create policy "Participants can read direct messages" on public.ltl_direct_messages for select to authenticated using (sender_id = auth.uid() or recipient_id = auth.uid());
+drop policy if exists "Users can send direct messages" on public.ltl_direct_messages;
+create policy "Users can send direct messages" on public.ltl_direct_messages for insert to authenticated with check (sender_id = auth.uid() and recipient_id <> auth.uid());
+
+create index if not exists ltl_direct_messages_pair_created_idx on public.ltl_direct_messages (sender_id, recipient_id, created_at);
+create index if not exists ltl_group_messages_group_created_idx on public.ltl_group_messages (group_id, created_at);

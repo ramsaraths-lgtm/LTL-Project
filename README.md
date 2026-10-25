@@ -51,3 +51,6 @@ The anon/publishable key is designed for frontend use with RLS enabled. Never pu
 - Question correct answers are currently readable by signed-in users because the quiz client checks answers in-browser. For high-stakes exams, store answer keys separately and validate answers server-side.
 - The upload SQL allows public file reads. Do not upload copyrighted/private materials unless you have permission and are comfortable with this access model.
 - Exam subjects are starter categories and should be adapted to each exam notification.
+
+## Phase 5 update
+See `PHASE-5-CHANGELOG.md` for the Phase 5 changes, Supabase migration notes, and known limitations. Scanned questions no longer default to Option A; an admin must confirm the answer key before publishing.
