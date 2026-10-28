@@ -1,21 +1,18 @@
-# LTL Phase 6 — Chat System
+# LTL Phase 6 — Complete Chat System (fixed build)
 
-## Included
-- Chat workspace integrated into the existing LTL navigation.
-- Direct messages and group message history backed by Supabase.
-- Public and private group creation; private groups use an invite code and selected members.
-- Group owner can add members; admin users tab lists registered profiles for admin accounts.
-- Responsive chat layout for desktop and mobile.
+## Vercel build error — cause and fix
+`src/ChatPage.tsx` in the GitHub repo was a copy of `App.tsx` (error lines were identical: `App.tsx(288,35)` and `ChatPage.tsx(288,35)`), so `ChatPage` had no `supabase/user/isAdmin` props. `src/ChatPage.tsx` is now the real chat component with typed props. **Replace the file in GitHub, do not just add it next to the old one.**
 
-## Required Supabase setup
-1. Open Supabase Dashboard → SQL Editor.
-2. Run the existing `supabase-setup.sql` first if this is a new project.
-3. Run `phase-6-chat-setup.sql`.
-4. Confirm `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are configured in Vercel Project Settings → Environment Variables.
-5. Redeploy after setting environment variables.
+## What is included
+- Chat UI (WhatsApp/Discord style): sidebar with Chats / Groups / Discover / People tabs, conversation pane, mobile single-pane mode.
+- Direct messages: realtime, history saved in Supabase, sent/read ticks, block / unblock (blocked users cannot message you; enforced by RLS).
+- Groups: Private (invite code + owner-selected members) and Public (searchable, member count, Join Group button).
+- Private group security: invite codes live in a separate owner-only table; joining is verified on the server (`ltl_join_group_by_code`); messages are protected by membership, so knowing a code alone never exposes messages. Owner can add/remove members and regenerate the code.
+- Online / offline status (Supabase Realtime presence), unread counts, user search, chat search, loading / empty / error states.
+- Admin panel → new **Users & Chat** tab: list users, suspend / restore chat access, list all groups, view members, remove members, delete groups. (Admins do not see message contents.)
 
-## Important
-- Chat is available to signed-in users only.
-- Supabase RLS must remain enabled. Never put a service-role key in the frontend.
-- Realtime publication additions may require checking Database → Replication in Supabase if your project uses a custom publication setup.
-- The admin user list displays rows in `public.profiles`; admin privileges still depend on the `profiles.role` value and existing RLS setup.
+## Setup (required, in this order)
+1. Supabase → SQL Editor → run `supabase-setup.sql` (only if not already done).
+2. Run `phase-6-chat-setup.sql` (new version; safe to re-run; also fixes a security hole in the older version that let anyone self-join a private group).
+3. Vercel env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`; redeploy.
+4. Supabase → Database → Replication: confirm `ltl_direct_messages` and `ltl_group_messages` are in the `supabase_realtime` publication (the SQL does this).
