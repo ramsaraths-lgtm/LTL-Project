@@ -16,8 +16,9 @@ type GroupRow = {
 type DmRow = { other_id: string; last_body: string | null; last_at: string | null; unread: number }
 type DiscoverRow = { id: string; name: string; description: string; member_count: number; is_member: boolean; created_at: string }
 type ChatMsg = { id: string; sender_id: string; body: string; created_at: string; read_at?: string | null }
+type DmRequest = { id: string; sender_id: string; recipient_id: string; status: 'pending'|'accepted'|'declined'|'cancelled'; created_at: string }
 type Conv = { kind: 'dm' | 'group'; id: string }
-type Tab = 'chats' | 'groups' | 'discover' | 'people'
+type Tab = 'chats' | 'groups' | 'discover' | 'people' | 'requests'
 type ListItem = { key: string; kind: 'dm' | 'group'; id: string; title: string; sub: string; at: string; unread: number; online: boolean; icon: 'dm' | 'public' | 'private' }
 
 const friendly = (message: string) => {
@@ -43,6 +44,7 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
   const [people, setPeople] = useState<Profile[]>([])
   const [groups, setGroups] = useState<GroupRow[]>([])
   const [dms, setDms] = useState<DmRow[]>([])
+  const [dmRequests, setDmRequests] = useState<DmRequest[]>([])
   const [blocked, setBlocked] = useState<Set<string>>(new Set())
   const [banned, setBanned] = useState(false)
   const [online, setOnline] = useState<Set<string>>(new Set())
@@ -75,11 +77,12 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
   // ---------- loading ----------
   const loadOverview = useCallback(async () => {
     if (!supabase || !uid) return
-    const [g, d, b, ban] = await Promise.all([
+    const [g, d, b, ban, req] = await Promise.all([
       supabase.rpc('ltl_my_chat_groups'),
       supabase.rpc('ltl_dm_overview'),
       supabase.from('ltl_user_blocks').select('blocked_id').eq('blocker_id', uid),
       supabase.from('ltl_chat_bans').select('user_id').eq('user_id', uid).maybeSingle(),
+      supabase.from('ltl_dm_requests').select('*').or(`sender_id.eq.${uid},recipient_id.eq.${uid}`).order('created_at', { ascending: false }).limit(100),
     ])
     const firstError = g.error ?? d.error ?? b.error
     if (firstError) setError(friendly(firstError.message))
@@ -88,11 +91,12 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
     if (!d.error) setDms(((d.data ?? []) as DmRow[]).map(row => ({ ...row, unread: Number(row.unread) })))
     if (!b.error) setBlocked(new Set(((b.data ?? []) as { blocked_id: string }[]).map(row => row.blocked_id)))
     setBanned(Boolean(ban.data))
+    if (!req.error) setDmRequests((req.data ?? []) as DmRequest[])
   }, [supabase, uid])
 
   const loadPeople = useCallback(async () => {
     if (!supabase || !uid) return
-    const { data, error: e } = await supabase.from('profiles').select('id, full_name, role').order('full_name', { ascending: true }).limit(1000)
+    const { data, error: e } = await supabase.from('ltl_learner_directory').select('id, full_name, role').order('full_name', { ascending: true }).limit(1000)
     if (e) setError(friendly(e.message))
     else setPeople((data ?? []) as Profile[])
   }, [supabase, uid])
@@ -164,6 +168,9 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
         const msg = payload.new as unknown as ChatMsg
         setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, read_at: msg.read_at } : m)))
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ltl_dm_requests', filter: `recipient_id=eq.${uid}` }, () => {
+        void loadOverview()
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ltl_group_messages' }, payload => {
         const msg = payload.new as unknown as ChatMsg & { group_id: string }
         const a = activeRef.current
@@ -221,6 +228,22 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
     }
     setSending(false)
     void loadOverview()
+  }
+
+  async function sendRequest(otherId: string) {
+    if (!supabase || !uid) return
+    const { error: e } = await supabase.rpc('ltl_send_dm_request', { p_recipient: otherId })
+    if (e) return setNotice(friendly(e.message))
+    setNotice(`Message request sent to ${nameOf(otherId)}.`)
+    await loadOverview()
+  }
+
+  async function respondRequest(requestId: string, accept: boolean) {
+    if (!supabase) return
+    const { error: e } = await supabase.rpc('ltl_respond_dm_request', { p_request: requestId, p_accept: accept })
+    if (e) return setNotice(friendly(e.message))
+    setNotice(accept ? 'Request accepted. You can now message each other.' : 'Request declined.')
+    await loadOverview()
   }
 
   async function toggleBlock(otherId: string) {
@@ -307,7 +330,7 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
       <aside className="chat-side">
         <label className="chat-search"><Search size={16} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder={tab === 'people' ? 'Search users' : tab === 'discover' ? 'Search public groups' : 'Search chats'} aria-label="Search" />{search && <button className="icon-button" aria-label="Clear search" onClick={() => setSearch('')}><X size={14} /></button>}</label>
         <div className="chat-tabs" role="tablist">
-          {([['chats', 'Chats'], ['groups', 'Groups'], ['discover', 'Discover'], ['people', 'People']] as [Tab, string][]).map(([id, label]) =>
+          {([['chats', 'Chats'], ['groups', 'Groups'], ['discover', 'Discover'], ['people', 'People'], ['requests', 'Requests']] as [Tab, string][]).map(([id, label]) =>
             <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{id === 'chats' && totalUnread > 0 && <span className="chat-badge">{totalUnread}</span>}</button>)}
         </div>
         <div className="chat-list">
@@ -331,10 +354,17 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
                 {g.is_member ? <button className="outline-button chat-mini" onClick={() => openConv({ kind: 'group', id: g.id })}>Open</button>
                   : <button className="primary-button chat-mini" onClick={() => void joinPublic(g)} disabled={banned}>Join Group</button>}
               </div>))}
+            {tab === 'requests' && (dmRequests.filter(r => r.status === 'pending' && r.recipient_id === uid).length === 0
+              ? <p className="chat-empty">No pending message requests.</p>
+              : dmRequests.filter(r => r.status === 'pending' && r.recipient_id === uid).map(r => <div className="chat-row" key={r.id}>
+                <span className="chat-avatar">{initials(nameOf(r.sender_id))}</span><span className="chat-row-copy"><strong>{nameOf(r.sender_id)}</strong><small>Wants to start a private chat</small></span>
+                <button className="primary-button chat-mini" onClick={() => void respondRequest(r.id, true)}><Check size={14}/> Accept</button>
+                <button className="outline-button chat-mini" onClick={() => void respondRequest(r.id, false)}><X size={14}/> Decline</button>
+              </div>))}
             {tab === 'people' && (filteredPeople.length === 0 ? <p className="chat-empty">No users found.</p>
-              : filteredPeople.map(p => <button key={p.id} className="chat-row" onClick={() => { openConv({ kind: 'dm', id: p.id }); setTab('chats') }}>
+              : filteredPeople.map(p => <button key={p.id} className="chat-row" onClick={() => { const accepted = dmRequests.some(r => r.status === 'accepted' && ((r.sender_id === uid && r.recipient_id === p.id) || (r.sender_id === p.id && r.recipient_id === uid))); if (accepted) { openConv({ kind: 'dm', id: p.id }); setTab('chats') } else { void sendRequest(p.id) } }}>
                 <span className="chat-avatar">{initials(p.full_name ?? 'Learner')}{online.has(p.id) && <i className="chat-dot" />}</span>
-                <span className="chat-row-copy"><strong>{p.full_name?.trim() || 'Learner'}</strong><small>{online.has(p.id) ? 'Online' : 'Offline'}{p.role === 'admin' ? ' · Admin' : ''}</small></span>
+                <span className="chat-row-copy"><strong>{p.full_name?.trim() || 'Learner'}</strong><small>{dmRequests.some(r => r.status === 'accepted' && ((r.sender_id === uid && r.recipient_id === p.id) || (r.sender_id === p.id && r.recipient_id === uid))) ? 'Connected · Open chat' : dmRequests.some(r => r.status === 'pending' && r.sender_id === uid && r.recipient_id === p.id) ? 'Request sent' : 'Send message request'}{p.role === 'admin' ? ' · Admin' : ''}</small></span>
               </button>))}
           </>}
         </div>
@@ -373,7 +403,9 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
               })}
             <div ref={bottomRef} />
           </div>
-          {iBlockedActive
+          {active.kind === 'dm' && !dmRequests.some(r => r.status === 'accepted' && ((r.sender_id === uid && r.recipient_id === active.id) || (r.sender_id === active.id && r.recipient_id === uid)))
+            ? <div className="chat-blocked">You can message after the other learner accepts your request. <button className="text-button" onClick={() => void sendRequest(active.id)}>Send request</button></div>
+            : iBlockedActive
             ? <div className="chat-blocked">You blocked {activeTitle}. <button className="text-button" onClick={() => void toggleBlock(active.id)}>Unblock to send messages</button></div>
             : <form className="chat-composer" onSubmit={(e: FormEvent) => { e.preventDefault(); void send() }}>
               <input aria-label="Message" value={draft} onChange={e => setDraft(e.target.value)} placeholder={banned ? 'Chat access suspended' : 'Write a message…'} disabled={banned} maxLength={4000} autoComplete="off" />
