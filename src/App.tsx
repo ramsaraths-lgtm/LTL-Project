@@ -5,17 +5,18 @@ import ChatPage from './ChatPage'
 import ChatAdmin from './ChatAdmin'
 import SecurityAudit from './SecurityAudit'
 import TestCenter from './TestCenter'
+import AiDoubtSolver from './AiDoubtSolver'
 import {
   ArrowLeft, ArrowRight, BookOpen, CheckCircle2, ChevronRight, ClipboardList,
   GraduationCap, Home, Menu, NotebookPen, Search, Settings2, Sparkles, UserRound,
   X, Zap, BookMarked, Brain, Calculator, Globe2, Languages, Landmark, Train,
-  BadgeCheck, Target, LockKeyhole, LogIn, LogOut, ShieldCheck, Upload, FileText, Video, Plus, Trash2, ScanText, Info, LoaderCircle, Eye, Users, Bell,
+  BadgeCheck, Target, LockKeyhole, LogIn, LogOut, ShieldCheck, Upload, FileText, Video, Plus, Trash2, ScanText, Info, LoaderCircle, Eye, Users, Bell, Bookmark, BookmarkCheck, ImagePlus, Bot,
 } from 'lucide-react'
 
 type Exam = { id: string; name: string; subtitle: string; short: string; color: string; tint: string; icon: string }
 type Resource = { id: string; title: string; subtitle: string; description: string; color: string; tint: string; icon: typeof GraduationCap }
 type Subject = { name: string; description: string; icon: typeof BookOpen }
-type Page = 'home' | 'exams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help'
+type Page = 'welcome' | 'home' | 'exams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help' | 'ai'
 
 type QuestionDraft = { question: string; options: [string, string, string, string]; answer: number; explanation: string }
 type ContentRow = { id: string; title: string; exam: string; subject: string; type: string; file_url: string; storage_path?: string; created_at?: string }
@@ -62,7 +63,12 @@ const subjects: Record<string, Subject[]> = {
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('home')
+  const [page, setPage] = useState<Page>('welcome')
+  const [authReady, setAuthReady] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [quizView, setQuizView] = useState<'all' | 'bookmarked'>('all')
+  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([])
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null)
   const [activeResource, setActiveResource] = useState<Resource | null>(null)
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null)
@@ -100,10 +106,14 @@ export default function App() {
 
   useEffect(() => {
     if (!supabase) return
-    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null) })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null))
+    supabase.auth.getSession().then(({ data }) => { const sessionUser = data.session?.user ?? null; setUser(sessionUser); setPage(sessionUser ? 'home' : 'welcome'); setAuthReady(true) })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { const sessionUser = session?.user ?? null; setUser(sessionUser); if (sessionUser) setPage(current => current === 'welcome' || current === 'login' ? 'home' : current); else setPage('welcome') })
     return () => listener.subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (authReady && !user && !['welcome', 'login'].includes(page)) setPage('login')
+  }, [authReady, user, page])
 
   useEffect(() => {
     let active = true
@@ -116,6 +126,19 @@ export default function App() {
       setProfileName(saved || fallback || '')
     }
     void loadSavedProfile()
+    return () => { active = false }
+  }, [user])
+
+  useEffect(() => {
+    let active = true
+    async function loadAvatar() {
+      if (!supabase || !user) { setAvatarUrl(''); return }
+      const path = String(user.user_metadata?.avatar_path || '')
+      if (!path) { setAvatarUrl(''); return }
+      const { data } = await supabase.storage.from('ltl-avatars').createSignedUrl(path, 60 * 60)
+      if (active) setAvatarUrl(data?.signedUrl || '')
+    }
+    void loadAvatar()
     return () => { active = false }
   }, [user])
 
@@ -157,7 +180,7 @@ export default function App() {
   function goBack() {
     if (page === 'subjects') setPage('options')
     else if (page === 'options') setPage('exams')
-    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin') setPage('home')
+    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin' || page === 'ai' || page === 'chat') setPage('home')
     window.scrollTo(0, 0)
   }
   async function handleAuth() {
@@ -187,7 +210,7 @@ export default function App() {
 
   async function handleSignOut() {
     if (supabase) await supabase.auth.signOut()
-    setIsAdmin(false); setPage('home'); setNotice('Signed out.')
+    setIsAdmin(false); setPage('welcome'); setNotice('Signed out.')
   }
 
   async function saveProfile() {
@@ -304,6 +327,51 @@ export default function App() {
     void loadLearningMaterials()
   }, [selectedExam, selectedSubject, activeResource, user])
 
+  useEffect(() => {
+    let active = true
+    async function loadBookmarks() {
+      setBookmarkedIds([])
+      if (!supabase || !user || !selectedExam || !selectedSubject || activeResource?.id !== 'quiz') return
+      const { data, error } = await supabase.from('ltl_quiz_bookmarks').select('question_id').eq('user_id', user.id).eq('exam', selectedExam.name).eq('subject', selectedSubject)
+      if (active && !error) setBookmarkedIds((data || []).map(row => row.question_id as string))
+    }
+    void loadBookmarks()
+    return () => { active = false }
+  }, [user, selectedExam, selectedSubject, activeResource])
+
+  async function toggleBookmark(questionId: string) {
+    if (!supabase || !user || !selectedExam || !selectedSubject) return
+    const exists = bookmarkedIds.includes(questionId)
+    if (exists) {
+      const { error } = await supabase.from('ltl_quiz_bookmarks').delete().eq('user_id', user.id).eq('question_id', questionId)
+      if (error) { setNotice(error.message); return }
+      setBookmarkedIds(prev => prev.filter(id => id !== questionId))
+    } else {
+      const { error } = await supabase.from('ltl_quiz_bookmarks').insert({ user_id: user.id, question_id: questionId, exam: selectedExam.name, subject: selectedSubject })
+      if (error) { setNotice(error.message); return }
+      setBookmarkedIds(prev => [...prev, questionId])
+    }
+  }
+
+  async function uploadAvatar(file?: File) {
+    if (!supabase || !user || !file) return
+    if (!file.type.startsWith('image/')) { setNotice('Choose an image file.'); return }
+    if (file.size > 5 * 1024 * 1024) { setNotice('Profile picture must be 5 MB or smaller.'); return }
+    setAvatarBusy(true)
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+      const path = `${user.id}/avatar.${ext}`
+      const { error: uploadError } = await supabase.storage.from('ltl-avatars').upload(path, file, { upsert: true, contentType: file.type })
+      if (uploadError) throw uploadError
+      const { error: metaError } = await supabase.auth.updateUser({ data: { avatar_path: path } })
+      if (metaError) throw metaError
+      const { data, error } = await supabase.storage.from('ltl-avatars').createSignedUrl(path, 60 * 60)
+      if (error) throw error
+      setAvatarUrl(data.signedUrl); setNotice('Profile picture updated successfully.')
+    } catch (e) { setNotice(e instanceof Error ? e.message : 'Could not upload profile picture. Run the Phase 10 SQL setup.') }
+    finally { setAvatarBusy(false) }
+  }
+
   const filteredSubjects = selectedExam ? (subjects[selectedExam.id] || []).filter(s => s.name.toLowerCase().includes(subjectSearch.toLowerCase())) : []
 
   return <div className="app-shell">
@@ -311,18 +379,15 @@ export default function App() {
       <div className="nav-inner">
         <button className="brand" onClick={goHome} aria-label="LTL home"><span className="brand-mark"><BookOpen size={21} strokeWidth={2.4} /></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></button>
         <nav className={`nav-links ${menuOpen ? 'nav-links-open' : ''}`} aria-label="Main navigation">
-          <button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button>
-          <button className={`nav-link ${page !== 'home' && page !== 'profile' ? 'active' : ''}`} onClick={openExams}>Explore exams</button>
-          <button className={`nav-link ${page === 'about' ? 'active' : ''}`} onClick={() => { setPage('about'); setMenuOpen(false); window.scrollTo(0, 0) }}>About LTL</button>
-          <button className={`nav-link ${page === 'help' ? 'active' : ''}`} onClick={() => { setPage('help'); setMenuOpen(false); window.scrollTo(0, 0) }}>Help Centre</button>
-          {user && <button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button>}
-          {isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}
+          {user && <><button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button><button className={`nav-link ${page === 'exams' || page === 'options' || page === 'subjects' ? 'active' : ''}`} onClick={openExams}>Explore exams</button><button className={`nav-link ${page === 'ai' ? 'active' : ''}`} onClick={() => { setPage('ai'); setMenuOpen(false) }}>AI Tutor</button><button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button>{isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}</>}
         </nav>
         <div className="nav-right">{user ? <button className="profile-button" onClick={() => { setPage('profile'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar"><UserRound size={17} /></span><span>{user.email?.split('@')[0] || 'Profile'}</span></button> : <button className="profile-button nav-signin-button" onClick={() => { setPage('login'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar"><LogIn size={17} /></span><span>Sign in</span></button>}<button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button></div>
       </div>
     </header>
 
-    {page === 'home' && <main>
+    {page === 'welcome' && !user && <main className="welcome-screen"><div className="welcome-orb welcome-orb-one"/><div className="welcome-orb welcome-orb-two"/><div className="welcome-content"><div className="welcome-brand"><span className="brand-mark"><BookOpen size={25}/></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></div><span className="eyebrow"><Sparkles size={15}/> YOUR FUTURE STARTS HERE</span><h1>Learn with purpose.<br/><span>Grow with confidence.</span></h1><p>Your competitive exam journey, organised in one place. Learn, practise and move closer to your goal — one day at a time.</p><button className="primary-button welcome-cta" onClick={()=>{setPage('login');setAuthMode('signin')}}>Get started <ArrowRight size={18}/></button><small className="welcome-caption">A smarter way to prepare for TNPSC · RRB · SSC</small></div><div className="welcome-visual"><div className="welcome-ring ring-a"/><div className="welcome-ring ring-b"/><div className="welcome-book"><GraduationCap size={76}/><strong>YOUR NEXT<br/>CHAPTER</strong><span>STARTS NOW</span></div><div className="welcome-chip chip-one"><CheckCircle2 size={16}/> Learn</div><div className="welcome-chip chip-two"><Zap size={16}/> Practise</div><div className="welcome-chip chip-three"><Target size={16}/> Achieve</div></div></main>}
+
+    {page === 'home' && user && <main>
       <section className="hero">
         <div className="hero-copy"><div className="eyebrow"><Sparkles size={14} /> YOUR GOALS, YOUR PACE</div><h1>One small step.<br /><span>A bigger future.</span></h1><p className="hero-description">Your exam journey doesn't have to feel overwhelming. Choose your path, learn at your pace, and keep moving forward.</p><button className="primary-button" onClick={openExams}>Find your exam <ArrowRight size={17} /></button><div className="hero-footnote"><span className="footnote-icon"><CheckCircle2 size={16} /></span>Simple learning. Steady progress.</div></div>
         <div className="hero-art" aria-label="Illustration of a student learning"><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /><div className="float-card note-float"><span className="mini-icon blue"><BookOpen size={17} /></span><span><strong>Learn something new</strong><small>One topic at a time</small></span></div><div className="study-card"><div className="study-card-top"><div className="study-avatar"><GraduationCap size={28} /></div><div><strong>Your journey</strong><span>Starts with a choice</span></div><span className="sparkle-dot">✦</span></div><div className="study-lines"><span className="line line-wide" /><span className="line line-short" /></div><div className="study-progress"><div className="progress-head"><span>Keep showing up</span><b>01 / 03</b></div><div className="progress-track"><span /></div></div><div className="study-checks"><span><CheckCircle2 size={15} /> Learn</span><span><span className="empty-check" /> Practice</span><span><span className="empty-check" /> Grow</span></div></div><div className="float-card streak-float"><span className="streak-icon">✦</span><span><strong>Progress, not pressure</strong><small>Every step counts</small></span></div><div className="art-sun" /></div>
@@ -335,9 +400,9 @@ export default function App() {
 
     {page === 'options' && selectedExam && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> All exams</button><div className="page-title-block"><span className="eyebrow section-eyebrow">STEP 02 · {selectedExam.name.toUpperCase()}</span><h1>How would you like to learn?</h1><p>Choose a learning mode. Next, you'll pick a subject for {selectedExam.name}.</p><div className="current-exam-pill" style={{ background: selectedExam.tint, color: selectedExam.color }}><CheckCircle2 size={15} /> {selectedExam.name} selected</div></div><div className="resource-grid phase-resource-grid">{resources.map((resource, index) => { const Icon = resource.icon; return <button key={resource.id} className="resource-card" onClick={() => chooseResource(resource)} style={{ '--resource-color': resource.color, '--resource-tint': resource.tint } as React.CSSProperties}><span className="resource-icon"><Icon size={22} /></span><span className="resource-number">0{index + 1}</span><strong>{resource.title}</strong><span className="resource-subtitle">{resource.subtitle}</span><span className="resource-link">Choose {resource.title.toLowerCase()} <ArrowRight size={14} /></span></button> })}</div></main>}
 
-    {page === 'subjects' && selectedExam && activeResource && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Learning options</button><div className="page-title-block"><span className="eyebrow section-eyebrow">STEP 03 · CHOOSE A SUBJECT</span><h1>{selectedExam.name} {activeResource.title}</h1><p>{activeResource.description} Select a subject below to continue.</p><div className="selection-pills"><span style={{ background: selectedExam.tint, color: selectedExam.color }}>{selectedExam.name}</span><span style={{ background: activeResource.tint, color: activeResource.color }}>{activeResource.title}</span></div></div><div className="subject-toolbar"><div className="subject-count"><BookMarked size={18} /><span><strong>{filteredSubjects.length} subjects</strong><small>Available for {selectedExam.name}</small></span></div><label className="subject-search"><Search size={17} /><input value={subjectSearch} onChange={e => setSubjectSearch(e.target.value)} placeholder="Search subjects" aria-label="Search subjects" /></label></div><div className="subject-grid">{filteredSubjects.map((subject, index) => { const Icon = subject.icon; const active = selectedSubject === subject.name; return <button key={subject.name} className={`subject-card ${active ? 'subject-card-active' : ''}`} onClick={() => setSelectedSubject(subject.name)} aria-pressed={active}><span className="subject-card-icon"><Icon size={21} /></span><span className="subject-card-content"><small>SUBJECT {String(index + 1).padStart(2, '0')}</small><strong>{subject.name}</strong><span>{subject.description}</span></span><span className="subject-card-action">{active ? <BadgeCheck size={20} /> : <ChevronRight size={20} />}</span></button> })}</div>{filteredSubjects.length === 0 && <div className="empty-subjects">No subjects match “{subjectSearch}”. Try another search.</div>}{selectedSubject && <><div className="subject-confirmation"><span className="confirmation-icon"><CheckCircle2 size={22} /></span><div><strong>{selectedSubject} selected</strong><p>Available {activeResource.title.toLowerCase()} content for {selectedExam.name} appears below.</p></div><button className="text-button" onClick={() => setSelectedSubject(null)}>Change</button></div>{(activeResource.id==='teaching'||activeResource.id==='notes')&&<div className="learner-materials"><h2>{activeResource.id==='teaching'?'Training videos':'PDF notes'}</h2>{learningContent.length===0?<p className="muted-line">No materials published for this subject yet.</p>:learningContent.map(item=><article className="learner-material" key={item.id}>{item.type==='video'?<Video size={21}/>:<FileText size={21}/>}<div><strong>{item.title}</strong><small>{item.exam} · {item.subject}</small></div><button className="primary-button small-action" onClick={()=>void openLearningFile(item)}>{item.type==='video'?'Watch':'Open PDF'} <ArrowRight size={14}/></button></article>)}</div>}{activeResource.id==='quiz'&&<div className="learner-materials"><h2>{activeResource.title} questions</h2>{!user?<div className="notice-box">Please <button className="inline-link" onClick={()=>setPage('login')}>sign in</button> to access questions.</div>:learnerQuestions.length===0?<p className="muted-line">No questions published for this subject yet.</p>:learnerQuestions.map((q,i)=><article className="learner-question" key={q.id}><strong>{i+1}. {q.question}</strong><div className="learner-options">{q.options.map((option,j)=><button key={j} className={learnerAnswers[q.id]===j?'chosen':''} onClick={()=>setLearnerAnswers(prev=>({...prev,[q.id]:j}))}>{String.fromCharCode(65+j)}. {option}</button>)}</div>{learnerAnswers[q.id]!==undefined&&<p className={learnerAnswers[q.id]===q.correct_option?'answer-correct':'answer-wrong'}>{learnerAnswers[q.id]===q.correct_option?'Correct answer!':'Not quite. Correct answer: '+String.fromCharCode(65+q.correct_option)}{q.explanation?' — '+q.explanation:''}</p>}</article>)}</div>}{activeResource.id==='test'&&(!user?<div className="notice-box">Please <button className="inline-link" onClick={()=>setPage('login')}>sign in</button> to access scheduled tests.</div>:<TestCenter supabase={supabase} user={user} isAdmin={isAdmin} exam={selectedExam.name} subject={selectedSubject}/> )}</>}</main>}
+    {page === 'subjects' && selectedExam && activeResource && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Learning options</button><div className="page-title-block"><span className="eyebrow section-eyebrow">STEP 03 · CHOOSE A SUBJECT</span><h1>{selectedExam.name} {activeResource.title}</h1><p>{activeResource.description} Select a subject below to continue.</p><div className="selection-pills"><span style={{ background: selectedExam.tint, color: selectedExam.color }}>{selectedExam.name}</span><span style={{ background: activeResource.tint, color: activeResource.color }}>{activeResource.title}</span></div></div><div className="subject-toolbar"><div className="subject-count"><BookMarked size={18} /><span><strong>{filteredSubjects.length} subjects</strong><small>Available for {selectedExam.name}</small></span></div><label className="subject-search"><Search size={17} /><input value={subjectSearch} onChange={e => setSubjectSearch(e.target.value)} placeholder="Search subjects" aria-label="Search subjects" /></label></div><div className="subject-grid">{filteredSubjects.map((subject, index) => { const Icon = subject.icon; const active = selectedSubject === subject.name; return <button key={subject.name} className={`subject-card ${active ? 'subject-card-active' : ''}`} onClick={() => setSelectedSubject(subject.name)} aria-pressed={active}><span className="subject-card-icon"><Icon size={21} /></span><span className="subject-card-content"><small>SUBJECT {String(index + 1).padStart(2, '0')}</small><strong>{subject.name}</strong><span>{subject.description}</span></span><span className="subject-card-action">{active ? <BadgeCheck size={20} /> : <ChevronRight size={20} />}</span></button> })}</div>{filteredSubjects.length === 0 && <div className="empty-subjects">No subjects match “{subjectSearch}”. Try another search.</div>}{selectedSubject && <><div className="subject-confirmation"><span className="confirmation-icon"><CheckCircle2 size={22} /></span><div><strong>{selectedSubject} selected</strong><p>Available {activeResource.title.toLowerCase()} content for {selectedExam.name} appears below.</p></div><button className="text-button" onClick={() => setSelectedSubject(null)}>Change</button></div>{(activeResource.id==='teaching'||activeResource.id==='notes')&&<div className="learner-materials"><h2>{activeResource.id==='teaching'?'Training videos':'PDF notes'}</h2>{learningContent.length===0?<p className="muted-line">No materials published for this subject yet.</p>:learningContent.map(item=><article className="learner-material" key={item.id}>{item.type==='video'?<Video size={21}/>:<FileText size={21}/>}<div><strong>{item.title}</strong><small>{item.exam} · {item.subject}</small></div><button className="primary-button small-action" onClick={()=>void openLearningFile(item)}>{item.type==='video'?'Watch':'Open PDF'} <ArrowRight size={14}/></button></article>)}</div>}{activeResource.id==='quiz'&&<div className="learner-materials"><div className="quiz-heading-row"><div><h2>{activeResource.title} questions</h2><p>{selectedExam.name} · {selectedSubject} — bookmarks stay inside this subject.</p></div><div className="quiz-view-tabs"><button className={quizView==='all'?'selected':''} onClick={()=>setQuizView('all')}>All questions</button><button className={quizView==='bookmarked'?'selected':''} onClick={()=>setQuizView('bookmarked')}><Bookmark size={15}/> Bookmarked ({bookmarkedIds.length})</button></div></div>{!user?<div className="notice-box">Please <button className="inline-link" onClick={()=>setPage('login')}>sign in</button> to access questions.</div>:learnerQuestions.filter(q=>quizView==='all'||bookmarkedIds.includes(q.id)).length===0?<p className="muted-line">{quizView==='bookmarked'?'No bookmarked questions in this subject yet.':'No questions published for this subject yet.'}</p>:learnerQuestions.filter(q=>quizView==='all'||bookmarkedIds.includes(q.id)).map((q,i)=><article className="learner-question" key={q.id}><div className="quiz-question-title"><strong>{i+1}. {q.question}</strong><button className={`bookmark-question ${bookmarkedIds.includes(q.id)?'is-bookmarked':''}`} onClick={()=>void toggleBookmark(q.id)} aria-label={bookmarkedIds.includes(q.id)?'Remove bookmark':'Bookmark question'} title={bookmarkedIds.includes(q.id)?'Remove bookmark':'Bookmark question'}>{bookmarkedIds.includes(q.id)?<BookmarkCheck size={19}/>:<Bookmark size={19}/>}</button></div><div className="learner-options">{q.options.map((option,j)=><button key={j} className={learnerAnswers[q.id]===j?'chosen':''} onClick={()=>setLearnerAnswers(prev=>({...prev,[q.id]:j}))}>{String.fromCharCode(65+j)}. {option}</button>)}</div>{learnerAnswers[q.id]!==undefined&&<p className={learnerAnswers[q.id]===q.correct_option?'answer-correct':'answer-wrong'}>{learnerAnswers[q.id]===q.correct_option?'Correct answer!':'Not quite. Correct answer: '+String.fromCharCode(65+q.correct_option)}{q.explanation?' — '+q.explanation:''}</p>}</article>)}</div>}{activeResource.id==='test'&&(!user?<div className="notice-box">Please <button className="inline-link" onClick={()=>setPage('login')}>sign in</button> to access scheduled tests.</div>:<TestCenter supabase={supabase} user={user} isAdmin={isAdmin} exam={selectedExam.name} subject={selectedSubject}/> )}</>}</main>}
 
-    {page === 'login' && <main className="inner-page auth-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="auth-card"><div className="auth-mark"><LockKeyhole size={26} /></div><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>{authMode === 'signin' ? 'Welcome back' : 'Create your account'}</h1><p>Sign in to access your LTL learning space. Admin tools are available only to accounts assigned the admin role in Supabase.</p>{authMode === 'signup' && <label className="profile-field"><span>Full name</span><input value={authName} onChange={e => setAuthName(e.target.value)} autoComplete="name" placeholder="Your full name" /></label>}<label className="profile-field"><span>Email address</span><input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" /></label><label className="profile-field"><span>Password</span><input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength={6} placeholder="At least 6 characters" /></label><button className="primary-button profile-save" disabled={authLoading} onClick={() => void handleAuth()}>{authLoading ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}{authMode === 'signin' ? 'Sign in' : 'Create account'}</button><button className="text-button auth-toggle" onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setNotice('') }}>{authMode === 'signin' ? 'New to LTL? Create an account' : 'Already registered? Sign in'}</button>{!supabase && <p className="setup-warning">Supabase setup required: add your project URL and anon key to the environment variables. See <code>.env.example</code> and <code>supabase-setup.sql</code>.</p>}{notice && <div className="notice-box">{notice}</div>}</div></main>}
+    {page === 'login' && <main className="inner-page auth-page"><button className="back-button" onClick={()=>setPage(user?'home':'welcome')}><ArrowLeft size={17} /> Back</button><div className="auth-card"><div className="auth-mark"><LockKeyhole size={26} /></div><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>{authMode === 'signin' ? 'Welcome back' : 'Create your account'}</h1><p>Sign in to access your LTL learning space. Admin tools are available only to accounts assigned the admin role in Supabase.</p>{authMode === 'signup' && <label className="profile-field"><span>Full name</span><input value={authName} onChange={e => setAuthName(e.target.value)} autoComplete="name" placeholder="Your full name" /></label>}<label className="profile-field"><span>Email address</span><input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} autoComplete="email" placeholder="you@example.com" /></label><label className="profile-field"><span>Password</span><input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength={6} placeholder="At least 6 characters" /></label><button className="primary-button profile-save" disabled={authLoading} onClick={() => void handleAuth()}>{authLoading ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}{authMode === 'signin' ? 'Sign in' : 'Create account'}</button><button className="text-button auth-toggle" onClick={() => { setAuthMode(authMode === 'signin' ? 'signup' : 'signin'); setNotice('') }}>{authMode === 'signin' ? 'New to LTL? Create an account' : 'Already registered? Sign in'}</button>{!supabase && <p className="setup-warning">Supabase setup required: add your project URL and anon key to the environment variables. See <code>.env.example</code> and <code>supabase-setup.sql</code>.</p>}{notice && <div className="notice-box">{notice}</div>}</div></main>}
 
     {page === 'about' && <main className="inner-page about-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="about-hero"><div className="about-icon"><BookOpen size={30} /></div><span className="eyebrow section-eyebrow">ABOUT US</span><h1>Live To Learn</h1><p>LTL is a learning platform designed to help competitive-exam aspirants prepare with more clarity and confidence. Choose an exam, explore the relevant subjects, learn through training videos, revise with PDF notes, and practise with quizzes and tests in one organised place.</p></div><div className="about-feature-grid"><article><GraduationCap size={23}/><h3>Learn</h3><p>Structured training resources for your chosen exam and subject.</p></article><article><FileText size={23}/><h3>Revise</h3><p>PDF notes organised by exam and subject for focused revision.</p></article><article><ClipboardList size={23}/><h3>Practise</h3><p>Quiz and test questions with four-option practice formats.</p></article><article><Target size={23}/><h3>Prepare</h3><p>A simple, exam-focused learning flow for TNPSC, RRB and SSC aspirants.</p></article></div><div className="people-card"><span className="eyebrow section-eyebrow">LEADERSHIP</span><h2>Founder &amp; CEO</h2><p className="person-name">Mr.S.Sarathkumar.B.A,DME.,</p><div className="person-divider"/><h2>Developer</h2><p className="person-name">Mr.M.Ajithkumar.B.E.</p></div></main>}
 
@@ -347,11 +412,13 @@ export default function App() {
 
     {page === 'profile' && !user && <main className="inner-page"><div className="notice-box">Please sign in to view and save your profile.</div><button className="primary-button" onClick={()=>setPage('login')}>Go to sign in <ArrowRight size={17}/></button></main>}
 
+    {page === 'ai' && user && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17}/> Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">SMART STUDY SUPPORT</span><h1>AI Doubt Solver</h1><p>Ask questions from any competitive-exam subject and get a step-by-step explanation.</p></div><AiDoubtSolver supabase={supabase} user={user} exam={selectedExam?.name || 'TNPSC / RRB / SSC'} subject={selectedSubject || 'General studies'}/></main>}
+
     {page === 'chat' && <ChatPage supabase={supabase} user={user} isAdmin={isAdmin} />}
 
     {page === 'admin' && !isAdmin && <main className="inner-page"><div className="notice-box">Admin access required. Sign in with an account assigned the admin role in Supabase.</div><button className="primary-button" onClick={()=>setPage('login')}>Go to sign in <ArrowRight size={17}/></button></main>}
 
-    {page === 'profile' && user && <main className="inner-page profile-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="profile-header-card"><div className="profile-large-avatar"><UserRound size={34} /></div><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>My profile</h1><p>Manage your LTL learning space and account.</p><span className="guest-badge"><CheckCircle2 size={14} /> Signed in · {user.email}</span>{user && <button className="outline-button" onClick={()=>void handleSignOut()}><LogOut size={16}/> Sign out</button>}</div><div className="profile-form-card"><h2>Profile details</h2><p>Use the sign-in page to keep your account connected across sessions.</p><label className="profile-field"><span>Display name</span><input value={profileName} onChange={e => setProfileName(e.target.value)} maxLength={40} placeholder="Enter your name" /></label><label className="profile-field"><span>Learning goal</span><select value={profileGoal} onChange={e => setProfileGoal(e.target.value)}><option>Prepare consistently</option><option>Improve my weak subjects</option><option>Revise before the exam</option><option>Practise with quizzes and tests</option></select></label><div className="profile-summary"><div><Target size={18} /><span><small>Current exam</small><strong>{selectedExam?.name ?? 'Not selected yet'}</strong></span></div><div><BookOpen size={18} /><span><small>Learning goal</small><strong>{profileGoal}</strong></span></div></div><button className="primary-button profile-save" onClick={() => void saveProfile()}>Save profile <CheckCircle2 size={17} /></button></div></main>}
+    {page === 'profile' && user && <main className="inner-page profile-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="profile-header-card"><div className="profile-large-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:<UserRound size={34}/>}</div><label className="avatar-upload-button"><ImagePlus size={16}/>{avatarBusy?'Uploading…':'Change profile photo'}<input type="file" accept="image/*" disabled={avatarBusy} onChange={e=>void uploadAvatar(e.target.files?.[0])}/></label><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>My profile</h1><p>Manage your LTL learning space and account.</p><span className="guest-badge"><CheckCircle2 size={14} /> Signed in · {user.email}</span>{user && <button className="outline-button" onClick={()=>void handleSignOut()}><LogOut size={16}/> Sign out</button>}</div><div className="profile-form-card"><h2>Profile details</h2><p>Use the sign-in page to keep your account connected across sessions.</p><label className="profile-field"><span>Display name</span><input value={profileName} onChange={e => setProfileName(e.target.value)} maxLength={40} placeholder="Enter your name" /></label><label className="profile-field"><span>Learning goal</span><select value={profileGoal} onChange={e => setProfileGoal(e.target.value)}><option>Prepare consistently</option><option>Improve my weak subjects</option><option>Revise before the exam</option><option>Practise with quizzes and tests</option></select></label><div className="profile-summary"><div><Target size={18} /><span><small>Current exam</small><strong>{selectedExam?.name ?? 'Not selected yet'}</strong></span></div><div><BookOpen size={18} /><span><small>Learning goal</small><strong>{profileGoal}</strong></span></div></div><button className="primary-button profile-save" onClick={() => void saveProfile()}>Save profile <CheckCircle2 size={17} /></button></div></main>}
 
     <footer className="footer" id="page-help"><button className="brand footer-brand" onClick={goHome} aria-label="LTL home"><span className="brand-mark"><BookOpen size={19} strokeWidth={2.4} /></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></button><p>Learn today. Lead tomorrow. <button className="footer-about-link" onClick={()=>setPage('about')}>About LTL</button> · <button className="footer-about-link" onClick={()=>setPage('help')}>Help Centre</button></p><span className="copyright">© {new Date().getFullYear()} LTL · Made for learners</span></footer>
   </div>
