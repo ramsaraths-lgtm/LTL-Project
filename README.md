@@ -54,3 +54,6 @@ The anon/publishable key is designed for frontend use with RLS enabled. Never pu
 
 ## Phase 5 update
 See `PHASE-5-CHANGELOG.md` for the Phase 5 changes, Supabase migration notes, and known limitations. Scanned questions no longer default to Option A; an admin must confirm the answer key before publishing.
+
+## Phase 9
+See `README-PHASE-9.txt` and run `phase-9-security-setup.sql` after Phases 6, 7 and 8.
