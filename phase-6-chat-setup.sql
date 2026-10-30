@@ -330,23 +330,40 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- ---------- 7. Function permissions ----------
-do $$
-declare f text;
-begin
-  foreach f in array array[
-    'ltl_is_admin()', 'ltl_is_banned(uuid)', 'ltl_is_group_member(uuid)', 'ltl_is_group_owner(uuid)',
-    'ltl_is_blocked_between(uuid,uuid)', 'ltl_new_invite_code()',
-    'ltl_create_chat_group(text,text,text,uuid[])', 'ltl_join_public_group(uuid)', 'ltl_join_group_by_code(text)',
-    'ltl_regenerate_invite_code(uuid)', 'ltl_add_chat_member(uuid,uuid)', 'ltl_mark_dm_read(uuid)',
-    'ltl_mark_group_read(uuid)', 'ltl_my_chat_groups()', 'ltl_discover_public_groups(text)',
-    'ltl_dm_overview()', 'ltl_admin_chat_overview()'
-  ] loop
-    execute format('revoke all on function public.%s from public, anon', f);
-    execute format('grant execute on function public.%s to authenticated', f);
-  end loop;
-end $$;
--- ltl_new_invite_code is internal only.
-revoke execute on function public.ltl_new_invite_code() from authenticated;
+revoke all on function public.ltl_is_admin() from public, anon;
+grant execute on function public.ltl_is_admin() to authenticated;
+revoke all on function public.ltl_is_banned(uuid) from public, anon;
+grant execute on function public.ltl_is_banned(uuid) to authenticated;
+revoke all on function public.ltl_is_group_member(uuid) from public, anon;
+grant execute on function public.ltl_is_group_member(uuid) to authenticated;
+revoke all on function public.ltl_is_group_owner(uuid) from public, anon;
+grant execute on function public.ltl_is_group_owner(uuid) to authenticated;
+revoke all on function public.ltl_is_blocked_between(uuid,uuid) from public, anon;
+grant execute on function public.ltl_is_blocked_between(uuid,uuid) to authenticated;
+revoke all on function public.ltl_create_chat_group(text,text,text,uuid[]) from public, anon;
+grant execute on function public.ltl_create_chat_group(text,text,text,uuid[]) to authenticated;
+revoke all on function public.ltl_join_public_group(uuid) from public, anon;
+grant execute on function public.ltl_join_public_group(uuid) to authenticated;
+revoke all on function public.ltl_join_group_by_code(text) from public, anon;
+grant execute on function public.ltl_join_group_by_code(text) to authenticated;
+revoke all on function public.ltl_regenerate_invite_code(uuid) from public, anon;
+grant execute on function public.ltl_regenerate_invite_code(uuid) to authenticated;
+revoke all on function public.ltl_add_chat_member(uuid,uuid) from public, anon;
+grant execute on function public.ltl_add_chat_member(uuid,uuid) to authenticated;
+revoke all on function public.ltl_mark_dm_read(uuid) from public, anon;
+grant execute on function public.ltl_mark_dm_read(uuid) to authenticated;
+revoke all on function public.ltl_mark_group_read(uuid) from public, anon;
+grant execute on function public.ltl_mark_group_read(uuid) to authenticated;
+revoke all on function public.ltl_my_chat_groups() from public, anon;
+grant execute on function public.ltl_my_chat_groups() to authenticated;
+revoke all on function public.ltl_discover_public_groups(text) from public, anon;
+grant execute on function public.ltl_discover_public_groups(text) to authenticated;
+revoke all on function public.ltl_dm_overview() from public, anon;
+grant execute on function public.ltl_dm_overview() to authenticated;
+revoke all on function public.ltl_admin_chat_overview() from public, anon;
+grant execute on function public.ltl_admin_chat_overview() to authenticated;
+-- ltl_new_invite_code is internal only (called by the other functions).
+revoke all on function public.ltl_new_invite_code() from public, anon, authenticated;
 
 -- ---------- 8. Realtime ----------
 do $$ begin alter publication supabase_realtime add table public.ltl_direct_messages;
