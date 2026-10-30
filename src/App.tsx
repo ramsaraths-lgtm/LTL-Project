@@ -78,7 +78,7 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authName, setAuthName] = useState('')
   const [notice, setNotice] = useState('')
-  const [adminTab, setAdminTab] = useState<'training' | 'notes' | 'quiz' | 'content' | 'manageQuiz' | 'chatAdmin' | 'notifications'>('training')
+  const [adminTab, setAdminTab] = useState<'training' | 'notes' | 'quiz' | 'content' | 'manageQuiz' | 'chatAdmin' | 'notifications' | 'security'>('training')
   const [uploadExam, setUploadExam] = useState('TNPSC')
   const [uploadSubject, setUploadSubject] = useState('General Studies')
   const [uploadTitle, setUploadTitle] = useState('')
