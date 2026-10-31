@@ -19,7 +19,7 @@ export default function AiDoubtSolver({ supabase, user, exam, subject }: Props) 
       const expiresSoon = (sess.session.expires_at ?? 0) * 1000 < Date.now() + 60_000
       if (expiresSoon) { const r = await supabase.auth.refreshSession(); if (r.data.session) sess = r.data }
       const token = sess.session?.access_token
-      const { data, error: invokeError } = await supabase.functions.invoke('ltl-ai-doubt-solver', {
+      const { data, error: invokeError } = await supabase.functions.invoke('hyper-worker', {
         body: { question: question.trim(), exam, subject },
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -31,7 +31,7 @@ export default function AiDoubtSolver({ supabase, user, exam, subject }: Props) 
           throw new Error(body?.error || body?.message || body?.msg || `Edge Function returned HTTP ${ctx.status}`)
         }
         if (invokeError.name === 'FunctionsFetchError') {
-          throw new Error('Cannot reach the AI function. Check that "ltl-ai-doubt-solver" is deployed in Supabase (exact name) and that VITE_SUPABASE_URL is correct.')
+          throw new Error('Cannot reach the AI function. Check that "hyper-worker" is deployed in Supabase (exact name) and that VITE_SUPABASE_URL is correct.')
         }
         throw invokeError
       }
@@ -48,5 +48,5 @@ export default function AiDoubtSolver({ supabase, user, exam, subject }: Props) 
     {answer&&<div className="ai-answer"><div><Sparkles size={17}/><strong>AI explanation</strong></div><p>{answer}</p></div>}
     <small className="ai-disclaimer"><MessageCircleQuestion size={14}/> AI answers can make mistakes. Verify important exam facts with trusted study materials.</small>
   </section>
-}
-  
+               }
+                          
