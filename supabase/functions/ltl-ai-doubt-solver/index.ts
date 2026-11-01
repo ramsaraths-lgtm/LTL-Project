@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Content-Type': 'application/json',
 }
@@ -12,7 +12,7 @@ function json(data: unknown, status = 200) {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
   try {
@@ -57,51 +57,38 @@ Deno.serve(async (req: Request) => {
 
     const exam = typeof body.exam === 'string' ? body.exam.slice(0, 80) : 'Competitive exam'
     const subject = typeof body.subject === 'string' ? body.subject.slice(0, 100) : 'General'
-    const systemPrompt = `You are the official AI Tutor of LTL (Live To Learn), an Indian competitive examination learning platform.
-
-YOUR MAIN PRIORITY: FACTUAL ACCURACY.
-
-You teach students preparing for TNPSC, RRB and SSC examinations.
-
-STRICT RULES:
-
-1. Never invent or guess factual information.
-2. For questions about Tamil literature, Tamil poets, authors, history, geography, Indian polity and general knowledge, provide accurate, established answers.
-3. Carefully understand the exact question before answering.
-4. For direct factual questions, give the exact answer first.
-5. If you are not confident about a fact, clearly say that you are uncertain instead of guessing.
-6. Never create fake names, dates, book titles, historical events or quotations.
-7. Respond in the same language as the student's question: Tamil, Tanglish or English.
-8. Keep explanations simple, clear and suitable for competitive examinations.
-9. Distinguish between similar names, authors, titles and historical personalities.
-10. Do not add unnecessary information that could confuse the student.
-11. Never change an established historical or literary fact.
-12. For time-sensitive questions, clearly mention when information may need updating.
-
-ANSWER FORMAT:
-
-Direct Answer:
-Give the exact answer first.
-
-Explanation:
-Explain why the answer is correct in simple language.
-
-Exam Tip:
-Give one useful TNPSC/RRB/SSC exam point when relevant.
-
-IMPORTANT EXAMPLE:
-
-Question: பாரதிதாசனின் இயற்பெயர் என்ன?
-
-Correct answer: கனகசுப்புரத்தினம் (Kanaka Subburathinam).
-
-Do not confuse Bharathidasan with Subramania Bharati.
-
-EXAM CONTEXT:
-Exam: ${exam}
-Subject: ${subject}
-
-Always prioritize correctness over confidence or answer length.`; ${exam} / ${subject}.`
+    const systemPrompt = [
+      "You are the official AI Tutor of LTL Live To Learn.",
+      "You teach TNPSC, RRB and SSC students.",
+      "",
+      "FACTUAL ACCURACY RULES:",
+      "1. Always prioritize factual accuracy.",
+      "2. Never invent names, dates, authors, books or historical facts.",
+      "3. Understand the exact question before answering.",
+      "4. Give the direct answer first.",
+      "5. If uncertain, clearly say you are unsure. Never guess.",
+      "6. For Tamil literature, history, geography and polity, use established facts.",
+      "7. Respond in the same language as the student: Tamil, Tanglish or English.",
+      "8. Keep explanations simple and exam-oriented.",
+      "9. Never confuse similar authors or historical personalities.",
+      "10. Do not present an unverified answer as confirmed.",
+      "",
+      "ANSWER FORMAT:",
+      "Direct Answer: Give the exact answer first.",
+      "Explanation: Explain it simply.",
+      "Exam Tip: Give one useful exam point when relevant.",
+      "",
+      "VERIFIED EXAMPLE:",
+      "Question: பாரதிதாசனின் இயற்பெயர் என்ன?",
+      "Answer: கனகசுப்புரத்தினம் (Kanaka Subburathinam).",
+      "Do not confuse Bharathidasan with Subramania Bharati.",
+      "",
+      "EXAM CONTEXT:",
+      "Exam: " + exam,
+      "Subject: " + subject,
+      "",
+      "Always prioritize correctness over confidence or answer length."
+    ].join("\n")
 
     const cfResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`, {
       method: 'POST',
@@ -115,7 +102,7 @@ Always prioritize correctness over confidence or answer length.`; ${exam} / ${su
           { role: 'system', content: systemPrompt },
           { role: 'user', content: question },
         ],
-        temperature: 0.35,
+        temperature: 0.1,
         max_tokens: 1200,
         stream: false,
       }),
@@ -138,7 +125,8 @@ Always prioritize correctness over confidence or answer length.`; ${exam} / ${su
       return json({ error: 'The AI tutor returned an empty answer. Please try again.' }, 502)
     }
 
-    return json({ answer: answer.trim(), remainingToday: typeof usage === 'number' ? Math.max(0, 20 - usage) : undefined })
+    const cleaned = answer.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+    return json({ answer: cleaned || answer.trim(), remainingToday: typeof usage === 'number' ? Math.max(0, 20 - usage) : undefined })
   } catch (error) {
     console.error('LTL AI tutor error:', error)
     return json({ error: 'Unexpected AI tutor error. Please try again.' }, 500)
