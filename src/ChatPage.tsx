@@ -23,7 +23,7 @@ type ListItem = { key: string; kind: 'dm' | 'group'; id: string; title: string; 
 
 const friendly = (message: string) => {
   if (/row-level security|permission denied/i.test(message)) return 'Not allowed. You may be blocked, suspended, or no longer a member.'
-  if (/could not find the function|does not exist|schema cache/i.test(message)) return 'Chat database is not set up yet. Run phase-6-chat-setup.sql in the Supabase SQL Editor, then refresh.'
+  if (/ltl_chat_people_directory|could not find the function|does not exist|schema cache/i.test(message)) return 'Run phase-11-setup.sql in Supabase SQL Editor to enable the learner directory, then refresh.'
   return message
 }
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -96,9 +96,9 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
 
   const loadPeople = useCallback(async () => {
     if (!supabase || !uid) return
-    const { data, error: e } = await supabase.from('ltl_learner_directory').select('id, full_name, role').order('full_name', { ascending: true }).limit(1000)
+    const { data, error: e } = await supabase.rpc('ltl_chat_people_directory')
     if (e) setError(friendly(e.message))
-    else setPeople((data ?? []) as Profile[])
+    else setPeople(((data ?? []) as Profile[]).filter(person => person.id !== uid))
   }, [supabase, uid])
 
   useEffect(() => {
