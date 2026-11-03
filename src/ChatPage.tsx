@@ -8,7 +8,7 @@ import {
 
 export type ChatPageProps = { supabase: SupabaseClient | null; user: User | null; isAdmin: boolean }
 
-type Profile = { id: string; full_name: string | null; role?: string | null }
+type Profile = { id: string; full_name: string | null; role?: string | null; avatar_path?: string | null }
 type GroupRow = {
   id: string; name: string; description: string; visibility: 'public' | 'private'; created_by: string
   created_at: string; role: string; member_count: number; unread: number; last_message_at: string | null
@@ -23,7 +23,7 @@ type ListItem = { key: string; kind: 'dm' | 'group'; id: string; title: string; 
 
 const friendly = (message: string) => {
   if (/row-level security|permission denied/i.test(message)) return 'Not allowed. You may be blocked, suspended, or no longer a member.'
-  if (/ltl_chat_people_directory|could not find the function|does not exist|schema cache/i.test(message)) return 'Run phase-11-setup.sql in Supabase SQL Editor to enable the learner directory, then refresh.'
+  if (/ltl_chat_people_directory|could not find the function|does not exist|schema cache/i.test(message)) return 'Run phase-12-setup.sql in Supabase SQL Editor to enable the updated learner directory, then refresh.'
   return message
 }
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -36,6 +36,7 @@ const dayLabel = (iso: string) => {
   return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
 }
 const initials = (name: string) => (name.trim().split(/\s+/).map(part => part[0]).slice(0, 2).join('') || '?').toUpperCase()
+const avatarFor = (supabase: SupabaseClient | null, path?: string | null) => path && supabase ? supabase.storage.from('ltl-avatars').getPublicUrl(path).data.publicUrl : ''
 // Supabase query builders are lazy: they only send the request once .then() is called.
 const fire = (query: PromiseLike<unknown>) => { void Promise.resolve(query).then(() => undefined, () => undefined) }
 
@@ -356,14 +357,14 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
               </div>))}
             {tab === 'requests' && (dmRequests.filter(r => r.status === 'pending' && r.recipient_id === uid).length === 0
               ? <p className="chat-empty">No pending message requests.</p>
-              : dmRequests.filter(r => r.status === 'pending' && r.recipient_id === uid).map(r => <div className="chat-row" key={r.id}>
-                <span className="chat-avatar">{initials(nameOf(r.sender_id))}</span><span className="chat-row-copy"><strong>{nameOf(r.sender_id)}</strong><small>Wants to start a private chat</small></span>
+              : dmRequests.filter(r => r.status === 'pending' && r.recipient_id === uid).map(r => <div className="chat-row chat-row-request" key={r.id}>
+                <span className="chat-avatar">{(() => { const person=people.find(p=>p.id===r.sender_id); const url=avatarFor(supabase,person?.avatar_path); return url?<img src={url} alt=""/>:initials(nameOf(r.sender_id)) })()}</span><span className="chat-row-copy chat-request-copy"><strong>{nameOf(r.sender_id)}</strong><small>Wants to start a private chat</small></span>
                 <button className="primary-button chat-mini" onClick={() => void respondRequest(r.id, true)}><Check size={14}/> Accept</button>
                 <button className="outline-button chat-mini" onClick={() => void respondRequest(r.id, false)}><X size={14}/> Decline</button>
               </div>))}
             {tab === 'people' && (filteredPeople.length === 0 ? <p className="chat-empty">No users found.</p>
               : filteredPeople.map(p => <button key={p.id} className="chat-row" onClick={() => { const accepted = dmRequests.some(r => r.status === 'accepted' && ((r.sender_id === uid && r.recipient_id === p.id) || (r.sender_id === p.id && r.recipient_id === uid))); if (accepted) { openConv({ kind: 'dm', id: p.id }); setTab('chats') } else { void sendRequest(p.id) } }}>
-                <span className="chat-avatar">{initials(p.full_name ?? 'Learner')}{online.has(p.id) && <i className="chat-dot" />}</span>
+                <span className="chat-avatar">{avatarFor(supabase,p.avatar_path)?<img src={avatarFor(supabase,p.avatar_path)} alt=""/>:initials(p.full_name ?? 'Learner')}{online.has(p.id) && <i className="chat-dot" />}</span>
                 <span className="chat-row-copy"><strong>{p.full_name?.trim() || 'Learner'}</strong><small>{dmRequests.some(r => r.status === 'accepted' && ((r.sender_id === uid && r.recipient_id === p.id) || (r.sender_id === p.id && r.recipient_id === uid))) ? 'Connected · Open chat' : dmRequests.some(r => r.status === 'pending' && r.sender_id === uid && r.recipient_id === p.id) ? 'Request sent' : 'Send message request'}{p.role === 'admin' ? ' · Admin' : ''}</small></span>
               </button>))}
           </>}

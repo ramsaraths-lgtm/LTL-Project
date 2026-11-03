@@ -10,13 +10,13 @@ import {
   ArrowLeft, ArrowRight, BookOpen, CheckCircle2, ChevronRight, ClipboardList,
   GraduationCap, Home, Menu, NotebookPen, Search, Settings2, Sparkles, UserRound,
   X, Zap, BookMarked, Brain, Calculator, Globe2, Languages, Landmark, Train,
-  BadgeCheck, Target, LockKeyhole, LogIn, LogOut, ShieldCheck, Upload, FileText, Video, Plus, Trash2, ScanText, Info, LoaderCircle, Eye, Users, Bell, Bookmark, BookmarkCheck, ImagePlus, Bot,
+  BadgeCheck, Target, LockKeyhole, LogIn, LogOut, ShieldCheck, Upload, FileText, Video, Plus, Trash2, ScanText, Info, LoaderCircle, Eye, Users, Bell, Bookmark, BookmarkCheck, ImagePlus, Bot, Trophy,
 } from 'lucide-react'
 
 type Exam = { id: string; name: string; subtitle: string; short: string; color: string; tint: string; icon: string }
 type Resource = { id: string; title: string; subtitle: string; description: string; color: string; tint: string; icon: typeof GraduationCap }
 type Subject = { name: string; description: string; icon: typeof BookOpen }
-type Page = 'welcome' | 'home' | 'exams' | 'subexams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help' | 'ai'
+type Page = 'welcome' | 'home' | 'exams' | 'subexams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help' | 'ai' | 'leaderboard'
 
 type QuestionDraft = { question: string; options: [string, string, string, string]; answer: number; explanation: string }
 type ContentRow = { id: string; title: string; exam: string; subject: string; type: string; file_url: string; storage_path?: string; created_at?: string }
@@ -128,6 +128,9 @@ export default function App() {
   const [page, setPage] = useState<Page>('welcome')
   const [authReady, setAuthReady] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [myTestPoints, setMyTestPoints] = useState(0)
+  const [leaderboardRows, setLeaderboardRows] = useState<Array<{user_id:string;full_name:string;points:number;avatar_path:string|null;rank:number}>>([])
+  const [leaderboardBusy, setLeaderboardBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [cropSource, setCropSource] = useState<string | null>(null)
   const [cropZoom, setCropZoom] = useState(1)
@@ -201,12 +204,29 @@ export default function App() {
       if (!supabase || !user) { setAvatarUrl(''); return }
       const path = String(user.user_metadata?.avatar_path || '')
       if (!path) { setAvatarUrl(''); return }
-      const { data } = await supabase.storage.from('ltl-avatars').createSignedUrl(path, 60 * 60)
-      if (active) setAvatarUrl(data?.signedUrl || '')
+      const { data } = supabase.storage.from('ltl-avatars').getPublicUrl(path)
+      if (active) setAvatarUrl(data?.publicUrl || '')
     }
     void loadAvatar()
     return () => { active = false }
   }, [user])
+
+  useEffect(() => {
+    let active = true
+    async function loadPoints() {
+      if (!supabase || !user) { setMyTestPoints(0); setLeaderboardRows([]); return }
+      const { data: mine } = await supabase.rpc('ltl_my_test_points')
+      if (active && mine !== null && mine !== undefined) setMyTestPoints(Number(mine) || 0)
+      if (page === 'leaderboard') {
+        setLeaderboardBusy(true)
+        const { data } = await supabase.rpc('ltl_test_leaderboard')
+        if (active) setLeaderboardRows((data || []) as typeof leaderboardRows)
+        if (active) setLeaderboardBusy(false)
+      }
+    }
+    void loadPoints()
+    return () => { active = false }
+  }, [user, page])
 
   useEffect(() => {
     async function loadRoleAndContent() {
@@ -248,7 +268,7 @@ export default function App() {
   function goBack() {
     if (page === 'subjects') setPage('options')
     else if (page === 'options') setPage('exams')
-    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin' || page === 'ai' || page === 'chat') setPage('home')
+    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin' || page === 'ai' || page === 'chat' || page === 'leaderboard') setPage('home')
     window.scrollTo(0, 0)
   }
   async function handleAuth() {
@@ -457,9 +477,8 @@ export default function App() {
       if (uploadError) throw uploadError
       const { error: metaError } = await supabase.auth.updateUser({ data: { avatar_path: path } })
       if (metaError) throw metaError
-      const { data, error } = await supabase.storage.from('ltl-avatars').createSignedUrl(path, 60 * 60)
-      if (error) throw error
-      setAvatarUrl(data.signedUrl); setCropSource(null); setNotice('Profile picture updated successfully.')
+      const { data } = supabase.storage.from('ltl-avatars').getPublicUrl(path)
+      setAvatarUrl(data.publicUrl); setCropSource(null); setNotice('Profile picture updated successfully.')
     } catch (e) { setNotice(e instanceof Error ? e.message : 'Could not upload profile picture. Check the Phase 10 avatar bucket and policies.') }
     finally { setAvatarBusy(false) }
   }
@@ -471,7 +490,7 @@ export default function App() {
       <div className="nav-inner">
         <button className="brand" onClick={goHome} aria-label="LTL home"><span className="brand-mark"><BookOpen size={21} strokeWidth={2.4} /></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></button>
         <nav className={`nav-links ${menuOpen ? 'nav-links-open' : ''}`} aria-label="Main navigation">
-          {user && <><button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button><button className={`nav-link ${page === 'exams' || page === 'subexams' || page === 'options' || page === 'subjects' ? 'active' : ''}`} onClick={openExams}>Explore exams</button><button className={`nav-link ${page === 'ai' ? 'active' : ''}`} onClick={() => { setPage('ai'); setMenuOpen(false) }}>AI Tutor</button><button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button>{isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}</>}
+          {user && <><button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button><button className={`nav-link ${page === 'exams' || page === 'subexams' || page === 'options' || page === 'subjects' ? 'active' : ''}`} onClick={openExams}>Explore exams</button><button className={`nav-link ${page === 'ai' ? 'active' : ''}`} onClick={() => { setPage('ai'); setMenuOpen(false) }}>AI Tutor</button><button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button><button className={`nav-link ${page === 'leaderboard' ? 'active' : ''}`} onClick={() => { setPage('leaderboard'); setMenuOpen(false); window.scrollTo(0, 0) }}>Leaderboard</button>{isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}</>}
         </nav>
         <div className="nav-right">{user ? <button className="profile-button" onClick={() => { setPage('profile'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar">{avatarUrl?<img src={avatarUrl} alt="" />:<UserRound size={17}/>}</span><span>{user.email?.split('@')[0] || 'Profile'}</span></button> : <button className="profile-button nav-signin-button" onClick={() => { setPage('login'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar"><LogIn size={17} /></span><span>Sign in</span></button>}<button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button></div>
       </div>
@@ -504,6 +523,8 @@ export default function App() {
 
     {page === 'help' && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17}/> Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">LTL SUPPORT</span><h1>Help Centre</h1><p>Need help with your account, learning materials, quizzes or chat? Contact our support team.</p></div><section className="admin-panel-card"><div className="panel-title"><Info size={22}/><div><h2>Contact support</h2><p>Send us your question and include a screenshot if you are reporting a technical issue.</p></div></div><a className="primary-button" href="mailto:bugzen.ai28@gmail.com?subject=LTL%20Help%20Centre%20Support">Email bugzen.ai28@gmail.com <ArrowRight size={17}/></a></section></main>}
 
+    {page === 'leaderboard' && user && <main className="inner-page leaderboard-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17}/> Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">TEST PERFORMANCE</span><h1><Trophy size={30}/> Leaderboard</h1><p>Points are earned only from marks scored in scheduled tests. Quiz scores, chat activity and AI usage do not add points.</p></div><div className="leaderboard-my-score"><Trophy size={22}/><span><small>Your test points</small><strong>{myTestPoints}</strong></span></div>{leaderboardBusy?<p className="muted-line">Loading leaderboard…</p>:leaderboardRows.length===0?<p className="muted-line">No submitted test scores yet. Complete a scheduled test to appear here.</p>:<div className="leaderboard-list">{leaderboardRows.map(row=><article className={`leaderboard-row ${row.user_id===user.id?'is-me':''}`} key={row.user_id}><b className="leaderboard-rank">#{row.rank}</b><span className="leaderboard-avatar">{row.avatar_path?<img src={supabase?.storage.from('ltl-avatars').getPublicUrl(row.avatar_path).data.publicUrl} alt=""/>:(row.full_name||'L').slice(0,1).toUpperCase()}</span><span className="leaderboard-name"><strong>{row.full_name}{row.user_id===user.id?' (You)':''}</strong><small>Test performance</small></span><strong className="leaderboard-points">{row.points} pts</strong></article>)}</div>}</main>}
+
     {page === 'profile' && !user && <main className="inner-page"><div className="notice-box">Please sign in to view and save your profile.</div><button className="primary-button" onClick={()=>setPage('login')}>Go to sign in <ArrowRight size={17}/></button></main>}
 
     {page === 'ai' && user && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17}/> Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">SMART STUDY SUPPORT</span><h1>AI Doubt Solver</h1><p>Ask questions from any competitive-exam subject and get a step-by-step explanation.</p></div><AiDoubtSolver supabase={supabase} user={user} exam={activeExamLabel || 'TNPSC / RRB / SSC'} subject={selectedSubject || 'General studies'}/></main>}
@@ -512,7 +533,7 @@ export default function App() {
 
     {page === 'admin' && !isAdmin && <main className="inner-page"><div className="notice-box">Admin access required. Sign in with an account assigned the admin role in Supabase.</div><button className="primary-button" onClick={()=>setPage('login')}>Go to sign in <ArrowRight size={17}/></button></main>}
 
-    {page === 'profile' && user && <main className="inner-page profile-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="profile-header-card"><div className="profile-large-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:<UserRound size={34}/>}</div><label className="avatar-upload-button"><ImagePlus size={16}/>{avatarBusy?'Uploading…':'Change profile photo'}<input type="file" accept="image/*" disabled={avatarBusy} onChange={e=>{selectAvatarFile(e.target.files?.[0]);e.currentTarget.value=''}}/></label><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>My profile</h1><p>Manage your LTL learning space and account.</p><span className="guest-badge"><CheckCircle2 size={14} /> Signed in · {user.email}</span>{user && <button className="outline-button" onClick={()=>void handleSignOut()}><LogOut size={16}/> Sign out</button>}</div><div className="profile-form-card"><h2>Profile details</h2><p>Use the sign-in page to keep your account connected across sessions.</p><label className="profile-field"><span>Display name</span><input value={profileName} onChange={e => setProfileName(e.target.value)} maxLength={40} placeholder="Enter your name" /></label><label className="profile-field"><span>Learning goal</span><select value={profileGoal} onChange={e => setProfileGoal(e.target.value)}><option>Prepare consistently</option><option>Improve my weak subjects</option><option>Revise before the exam</option><option>Practise with quizzes and tests</option></select></label><div className="profile-summary"><div><Target size={18} /><span><small>Current exam</small><strong>{activeExamLabel || 'Not selected yet'}</strong></span></div><div><BookOpen size={18} /><span><small>Learning goal</small><strong>{profileGoal}</strong></span></div></div><button className="primary-button profile-save" onClick={() => void saveProfile()}>Save profile <CheckCircle2 size={17} /></button></div></main>}
+    {page === 'profile' && user && <main className="inner-page profile-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17} /> Back</button><div className="profile-header-card"><div className="profile-large-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:<UserRound size={34}/>}</div><label className="avatar-upload-button"><ImagePlus size={16}/>{avatarBusy?'Uploading…':'Change profile photo'}<input type="file" accept="image/*" disabled={avatarBusy} onChange={e=>{selectAvatarFile(e.target.files?.[0]);e.currentTarget.value=''}}/></label><span className="eyebrow section-eyebrow">YOUR LEARNING SPACE</span><h1>My profile</h1><p>Manage your LTL learning space and account.</p><span className="guest-badge"><CheckCircle2 size={14} /> Signed in · {user.email}</span>{user && <button className="outline-button" onClick={()=>void handleSignOut()}><LogOut size={16}/> Sign out</button>}</div><div className="profile-form-card"><h2>Profile details</h2><p>Use the sign-in page to keep your account connected across sessions.</p><label className="profile-field"><span>Display name</span><input value={profileName} onChange={e => setProfileName(e.target.value)} maxLength={40} placeholder="Enter your name" /></label><label className="profile-field"><span>Learning goal</span><select value={profileGoal} onChange={e => setProfileGoal(e.target.value)}><option>Prepare consistently</option><option>Improve my weak subjects</option><option>Revise before the exam</option><option>Practise with quizzes and tests</option></select></label><div className="test-points-card"><Trophy size={21}/><span><small>Test points</small><strong>{myTestPoints} points</strong></span><button className="outline-button" onClick={()=>{setPage('leaderboard');window.scrollTo(0,0)}}>View leaderboard</button></div><div className="profile-summary"><div><Target size={18} /><span><small>Current exam</small><strong>{activeExamLabel || 'Not selected yet'}</strong></span></div><div><BookOpen size={18} /><span><small>Learning goal</small><strong>{profileGoal}</strong></span></div></div><button className="primary-button profile-save" onClick={() => void saveProfile()}>Save profile <CheckCircle2 size={17} /></button></div></main>}
 
     {cropSource && <div className="crop-modal-backdrop" role="presentation"><section className="crop-modal" role="dialog" aria-modal="true" aria-labelledby="crop-title"><div className="crop-modal-head"><div><span className="eyebrow section-eyebrow">PROFILE PHOTO</span><h2 id="crop-title">Crop your picture</h2></div><button className="icon-button" type="button" onClick={()=>setCropSource(null)} aria-label="Cancel crop"><X size={19}/></button></div><div className="avatar-crop-window"><img src={cropSource} alt="Selected profile crop preview" style={{transform:`scale(${cropZoom})`}}/></div><label className="profile-field crop-zoom-control"><span>Zoom</span><input type="range" min="1" max="3" step="0.05" value={cropZoom} onChange={e=>setCropZoom(Number(e.target.value))}/></label><p className="muted-line">Move the zoom slider to frame your face inside the square. The centre area will be saved.</p><div className="crop-modal-actions"><button className="outline-button" type="button" onClick={()=>setCropSource(null)}>Cancel</button><button className="primary-button" type="button" disabled={avatarBusy} onClick={()=>void saveCroppedAvatar()}>{avatarBusy?<LoaderCircle className="spin" size={16}/>:<CheckCircle2 size={16}/>} Save cropped photo</button></div></section></div>}
 
