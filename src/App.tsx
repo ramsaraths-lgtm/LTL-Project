@@ -16,7 +16,7 @@ import {
 type Exam = { id: string; name: string; subtitle: string; short: string; color: string; tint: string; icon: string }
 type Resource = { id: string; title: string; subtitle: string; description: string; color: string; tint: string; icon: typeof GraduationCap }
 type Subject = { name: string; description: string; icon: typeof BookOpen }
-type Page = 'welcome' | 'home' | 'exams' | 'subexams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help' | 'ai' | 'leaderboard'
+type Page = 'welcome' | 'home' | 'exams' | 'subexams' | 'options' | 'subjects' | 'profile' | 'login' | 'admin' | 'about' | 'chat' | 'help' | 'ai' | 'leaderboard' | 'mistakes'
 
 type QuestionDraft = { question: string; options: [string, string, string, string]; answer: number; explanation: string }
 type ContentRow = { id: string; title: string; exam: string; subject: string; type: string; file_url: string; storage_path?: string; created_at?: string }
@@ -227,7 +227,7 @@ export default function App() {
       const path = String(user.user_metadata?.avatar_path || '')
       if (!path) { setAvatarUrl(''); return }
       const { data } = supabase.storage.from('ltl-avatars').getPublicUrl(path)
-      if (active) setAvatarUrl(data?.publicUrl || '')
+      if (active) setAvatarUrl(data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : '')
     }
     void loadAvatar()
     return () => { active = false }
@@ -290,7 +290,7 @@ export default function App() {
   function goBack() {
     if (page === 'subjects') setPage('options')
     else if (page === 'options') setPage('exams')
-    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin' || page === 'ai' || page === 'chat' || page === 'leaderboard') setPage('home')
+    else if (page === 'exams' || page === 'profile' || page === 'about' || page === 'help' || page === 'login' || page === 'admin' || page === 'ai' || page === 'chat' || page === 'leaderboard' || page === 'mistakes') setPage('home')
     window.scrollTo(0, 0)
   }
   async function handleAuth() {
@@ -543,13 +543,16 @@ export default function App() {
       if (!context) throw new Error('Image crop is not supported in this browser.')
       context.drawImage(image, sx, sy, side, side, 0, 0, 512, 512)
       const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not prepare the cropped image.')), 'image/jpeg', 0.88))
-      const path = `${user.id}/avatar.jpg`
+      const path = `${user.id}/avatar-${Date.now()}.jpg`
       const { error: uploadError } = await supabase.storage.from('ltl-avatars').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
       if (uploadError) throw uploadError
       const { error: metaError } = await supabase.auth.updateUser({ data: { avatar_path: path } })
       if (metaError) throw metaError
       const { data } = supabase.storage.from('ltl-avatars').getPublicUrl(path)
-      setAvatarUrl(data.publicUrl); setCropSource(null); setNotice('Profile picture updated successfully.')
+      const freshUrl = `${data.publicUrl}?v=${Date.now()}`
+      setAvatarUrl(freshUrl)
+      await supabase.auth.refreshSession()
+      setCropSource(null); setNotice('Profile picture updated successfully.')
     } catch (e) { setNotice(e instanceof Error ? e.message : 'Could not upload profile picture. Check the Phase 10 avatar bucket and policies.') }
     finally { setAvatarBusy(false) }
   }
@@ -561,7 +564,7 @@ export default function App() {
       <div className="nav-inner">
         <button className="brand" onClick={goHome} aria-label="LTL home"><span className="brand-mark"><BookOpen size={21} strokeWidth={2.4} /></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></button>
         <nav className={`nav-links ${menuOpen ? 'nav-links-open' : ''}`} aria-label="Main navigation">
-          {user && <><button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button><button className={`nav-link ${page === 'exams' || page === 'subexams' || page === 'options' || page === 'subjects' ? 'active' : ''}`} onClick={openExams}>Explore exams</button><button className={`nav-link ${page === 'ai' ? 'active' : ''}`} onClick={() => { setPage('ai'); setMenuOpen(false) }}>AI Tutor</button><button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button><button className={`nav-link ${page === 'leaderboard' ? 'active' : ''}`} onClick={() => { setPage('leaderboard'); setMenuOpen(false); window.scrollTo(0, 0) }}>Leaderboard</button>{isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}</>}
+          {user && <><button className={`nav-link ${page === 'home' ? 'active' : ''}`} onClick={goHome}>Home</button><button className={`nav-link ${page === 'exams' || page === 'subexams' || page === 'options' || page === 'subjects' ? 'active' : ''}`} onClick={openExams}>Explore exams</button><button className={`nav-link ${page === 'ai' ? 'active' : ''}`} onClick={() => { setPage('ai'); setMenuOpen(false) }}>AI Tutor</button><button className={`nav-link ${page === 'chat' ? 'active' : ''}`} onClick={() => { setPage('chat'); setMenuOpen(false); window.scrollTo(0, 0) }}>Chat</button><button className={`nav-link ${page === 'leaderboard' ? 'active' : ''}`} onClick={() => { setPage('leaderboard'); setMenuOpen(false); window.scrollTo(0, 0) }}>Leaderboard</button><button className={`nav-link ${page === 'mistakes' ? 'active' : ''}`} onClick={() => { setPage('mistakes'); setMenuOpen(false); window.scrollTo(0, 0) }}>Mistake Notebook</button>{isAdmin && <button className={`nav-link nav-admin-link ${page === 'admin' ? 'active' : ''}`} onClick={() => { setPage('admin'); setMenuOpen(false); window.scrollTo(0, 0) }}>Admin panel</button>}</>}
         </nav>
         <div className="nav-right">{user ? <button className="profile-button" onClick={() => { setPage('profile'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar">{avatarUrl?<img src={avatarUrl} alt="" />:<UserRound size={17}/>}</span><span>{user.email?.split('@')[0] || 'Profile'}</span></button> : <button className="profile-button nav-signin-button" onClick={() => { setPage('login'); setMenuOpen(false); window.scrollTo(0, 0) }}><span className="profile-avatar"><LogIn size={17} /></span><span>Sign in</span></button>}<button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button></div>
       </div>
@@ -600,6 +603,8 @@ export default function App() {
 
     {page === 'ai' && user && <main className="inner-page"><button className="back-button" onClick={goBack}><ArrowLeft size={17}/> Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">SMART STUDY SUPPORT</span><h1>AI Doubt Solver</h1><p>Ask questions from any competitive-exam subject and get a step-by-step explanation.</p></div><AiDoubtSolver supabase={supabase} user={user} exam={activeExamLabel || 'TNPSC / RRB / SSC'} subject={selectedSubject || 'General studies'}/></main>}
 
+
+    {page === 'mistakes' && user && supabase && <MistakeNotebook supabase={supabase} user={user} />}
     {page === 'chat' && <ChatPage supabase={supabase} user={user} isAdmin={isAdmin} />}
 
     {page === 'admin' && !isAdmin && <main className="inner-page"><div className="notice-box">Admin access required. Sign in with an account assigned the admin role in Supabase.</div><button className="primary-button" onClick={()=>setPage('login')}>Go to sign in <ArrowRight size={17}/></button></main>}
@@ -610,4 +615,12 @@ export default function App() {
 
     <footer className="footer" id="page-help"><button className="brand footer-brand" onClick={goHome} aria-label="LTL home"><span className="brand-mark"><BookOpen size={19} strokeWidth={2.4} /></span><span className="brand-copy"><strong>LTL<span>.</span></strong><small>LIVE TO LEARN</small></span></button><p>Learn today. Lead tomorrow. <button className="footer-about-link" onClick={()=>setPage('about')}>About LTL</button> · <button className="footer-about-link" onClick={()=>setPage('help')}>Help Centre</button></p><span className="copyright">© {new Date().getFullYear()} LTL · Made for learners</span></footer>
   </div>
+}
+
+
+function MistakeNotebook({supabase,user}:{supabase:SupabaseClient;user:User}) {
+ const [rows,setRows]=useState<any[]>([]); const [busy,setBusy]=useState(true); const [filter,setFilter]=useState('All');
+ useEffect(()=>{let live=true; (async()=>{const {data,error}=await supabase.from('ltl_mistake_notebook').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(500);if(live){setRows(error?[]:(data||[]));setBusy(false)}})();return()=>{live=false}},[supabase,user.id]);
+ const visible=filter==='All'?rows:rows.filter(r=>r.exam===filter);
+ return <main className="inner-page"><button className="back-button" onClick={()=>window.history.back()}>← Back</button><div className="page-title-block"><span className="eyebrow section-eyebrow">LEARN FROM EVERY ATTEMPT</span><h1>📘 Mistake Notebook</h1><p>Wrong and unanswered questions from your submitted scheduled tests are saved here automatically.</p></div><label className="profile-field"><span>Filter by exam</span><select value={filter} onChange={e=>setFilter(e.target.value)}><option>All</option>{Array.from(new Set(rows.map(r=>r.exam))).map(x=><option key={x}>{x}</option>)}</select></label>{busy?<p>Loading mistakes…</p>:visible.length===0?<p className="muted-line">No mistakes saved yet. Complete a scheduled test to build your notebook.</p>:visible.map((r,i)=><article className="learner-question" key={r.id}><small>{r.exam} · {r.subject} · {new Date(r.created_at).toLocaleDateString()}</small><strong>{i+1}. {r.question}</strong><p>Your answer: {r.selected_option===null?'Not answered':String.fromCharCode(65+r.selected_option)+'. '+r.options[r.selected_option]}</p><p className="answer-correct">Correct answer: {String.fromCharCode(65+r.correct_option)}. {r.options[r.correct_option]}</p><button className="outline-button" onClick={async()=>{const {error}=await supabase.from('ltl_mistake_notebook').delete().eq('id',r.id);if(!error)setRows(prev=>prev.filter(x=>x.id!==r.id))}}>Remove from notebook</button></article>)}</main>
 }

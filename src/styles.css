@@ -466,3 +466,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid #93b4ff; outline-offs
 .leaderboard-name small{font-size:10px;color:#8792a3}
 .leaderboard-points{white-space:nowrap;color:#2459bd;font-size:14px}
 @media(max-width:640px){.nav-right{gap:6px}.profile-button{width:48px;height:48px;padding:4px;border-radius:13px}.profile-avatar{width:36px;height:36px;min-width:36px;min-height:36px;flex-basis:36px}.chat-row-request{align-items:flex-start}.chat-row-request .chat-mini{margin-left:52px}.test-points-card{flex-wrap:wrap}.test-points-card .outline-button{width:100%}}
+
+/* Phase 14 chat media and group identity */
+.chat-image-button{min-width:42px;display:grid;place-items:center;padding:9px!important}
+.chat-image-attachment{display:block;max-width:min(260px,65vw);max-height:300px;object-fit:contain;border-radius:10px;margin:4px 0}
+.chat-image-link{display:block}
+.group-avatar-setting{display:flex;align-items:center;gap:12px;margin:12px 0 16px}
+.group-avatar-setting>img,.group-avatar-setting>span{width:64px;height:64px;border-radius:18px;object-fit:cover;background:#edf2fb;display:grid;place-items:center}
+.group-avatar-setting input{display:none}
+@media(max-width:600px){.chat-composer{gap:6px}.chat-image-attachment{max-width:58vw}}

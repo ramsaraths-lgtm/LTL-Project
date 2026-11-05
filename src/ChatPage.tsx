@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import {
-  ArrowLeft, Ban, Check, CheckCheck, Copy, Globe, Info, LoaderCircle, LockKeyhole, LogOut,
+  ArrowLeft, Ban, Check, CheckCheck, Copy, Globe, Info, LoaderCircle, LockKeyhole, LogOut, ImagePlus,
   MessageCircle, Plus, RefreshCw, Search, Send, Trash2, UserPlus, Users, X,
 } from 'lucide-react'
 
@@ -15,7 +15,7 @@ type GroupRow = {
 }
 type DmRow = { other_id: string; last_body: string | null; last_at: string | null; unread: number }
 type DiscoverRow = { id: string; name: string; description: string; member_count: number; is_member: boolean; created_at: string }
-type ChatMsg = { id: string; sender_id: string; body: string; created_at: string; read_at?: string | null }
+type ChatMsg = { id: string; sender_id: string; body: string; image_path?: string | null; created_at: string; read_at?: string | null }
 type DmRequest = { id: string; sender_id: string; recipient_id: string; status: 'pending'|'accepted'|'declined'|'cancelled'; created_at: string }
 type Conv = { kind: 'dm' | 'group'; id: string }
 type Tab = 'chats' | 'groups' | 'discover' | 'people' | 'requests'
@@ -58,6 +58,9 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [draft, setDraft] = useState('')
+  const [imageBusy, setImageBusy] = useState(false)
+  const [imageUrls, setImageUrls] = useState<Record<string,string>>({})
+  const imageInputRef = useRef<HTMLInputElement|null>(null)
   const [sending, setSending] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
@@ -145,6 +148,15 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages, msgLoading])
 
+  useEffect(() => {
+    if (!supabase) return
+    let live = true
+    const pending = messages.filter(m => m.image_path && !imageUrls[m.id])
+    if (!pending.length) return
+    void Promise.all(pending.map(async m => { const { data } = await supabase.storage.from('ltl-chat-images').createSignedUrl(m.image_path!, 3600); return [m.id, data?.signedUrl || ''] as const })).then(rows => { if (live) setImageUrls(prev => ({ ...prev, ...Object.fromEntries(rows) })) })
+    return () => { live = false }
+  }, [messages, supabase, imageUrls])
+
   // realtime: new messages, read receipts
   useEffect(() => {
     if (!supabase || !uid) return
@@ -214,21 +226,31 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
   // ---------- actions ----------
   const openConv = (conv: Conv) => { setActive(conv); setNotice('') }
 
-  async function send() {
+  async function send(imagePath?: string) {
     const body = draft.trim()
-    if (!supabase || !uid || !active || !body || sending) return
+    if (!supabase || !uid || !active || (!body && !imagePath) || sending) return
     setSending(true)
-    if (active.kind === 'dm') {
-      const { data, error: e } = await supabase.from('ltl_direct_messages').insert({ sender_id: uid, recipient_id: active.id, body }).select('*').single()
-      if (e) setNotice(friendly(e.message))
-      else { const row = data as ChatMsg; setMessages(prev => (prev.some(m => m.id === row.id) ? prev : [...prev, row])); setDraft('') }
-    } else {
-      const { data, error: e } = await supabase.from('ltl_group_messages').insert({ group_id: active.id, sender_id: uid, body }).select('*').single()
-      if (e) setNotice(friendly(e.message))
-      else { const row = data as ChatMsg; setMessages(prev => (prev.some(m => m.id === row.id) ? prev : [...prev, row])); setDraft('') }
-    }
+    const table = active.kind === 'dm' ? 'ltl_direct_messages' : 'ltl_group_messages'
+    const payload = active.kind === 'dm' ? { sender_id: uid, recipient_id: active.id, body: body || '📷 Image', image_path: imagePath || null } : { group_id: active.id, sender_id: uid, body: body || '📷 Image', image_path: imagePath || null }
+    const { data, error: e } = await supabase.from(table).insert(payload).select('*').single()
+    if (e) setNotice(friendly(e.message))
+    else { const row = data as ChatMsg; setMessages(prev => (prev.some(m => m.id === row.id) ? prev : [...prev, row])); setDraft('') }
     setSending(false)
     void loadOverview()
+  }
+
+  async function sendImage(file?: File) {
+    if (!file || !supabase || !uid || !active) return
+    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) { setNotice('Choose an image smaller than 5 MB.'); return }
+    setImageBusy(true)
+    try {
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg'
+      const path = `${uid}/${active.kind}/${active.id}/${crypto.randomUUID()}.${ext}`
+      const { error } = await supabase.storage.from('ltl-chat-images').upload(path, file, { contentType: file.type, upsert: false })
+      if (error) throw error
+      await send(path)
+    } catch (e) { setNotice(e instanceof Error ? e.message : 'Could not send image. Run phase-14-setup.sql first.') }
+    finally { setImageBusy(false) }
   }
 
   async function sendRequest(otherId: string) {
@@ -396,7 +418,7 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
                   <div className={`chat-msg ${mine ? 'mine' : ''}`}>
                     <div className="chat-bubble">
                       {active.kind === 'group' && !mine && <b className="chat-sender">{nameOf(m.sender_id)}</b>}
-                      <span className="chat-text">{m.body}</span>
+                      {m.image_path && imageUrls[m.id] && <a className="chat-image-link" href={imageUrls[m.id]} target="_blank" rel="noreferrer"><img className="chat-image-attachment" src={imageUrls[m.id]} alt="Image attachment" loading="lazy"/></a>}{m.body.trim() && m.body !== '📷 Image' && <span className="chat-text">{m.body}</span>}
                       <small className="chat-meta">{timeOf(m.created_at)}{mine && active.kind === 'dm' && (m.read_at ? <CheckCheck size={14} className="chat-read" aria-label="Read" /> : <Check size={14} aria-label="Sent" />)}</small>
                     </div>
                   </div>
@@ -409,6 +431,8 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
             : iBlockedActive
             ? <div className="chat-blocked">You blocked {activeTitle}. <button className="text-button" onClick={() => void toggleBlock(active.id)}>Unblock to send messages</button></div>
             : <form className="chat-composer" onSubmit={(e: FormEvent) => { e.preventDefault(); void send() }}>
+              <input ref={imageInputRef} type="file" accept="image/*" hidden onChange={e => { void sendImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
+              <button className="outline-button chat-image-button" type="button" aria-label="Send image" disabled={banned || imageBusy || sending} onClick={() => imageInputRef.current?.click()}>{imageBusy ? <LoaderCircle className="spin" size={17}/> : <ImagePlus size={18}/>}</button>
               <input aria-label="Message" value={draft} onChange={e => setDraft(e.target.value)} placeholder={banned ? 'Chat access suspended' : 'Write a message…'} disabled={banned} maxLength={4000} autoComplete="off" />
               <button className="primary-button" type="submit" disabled={banned || sending || !draft.trim()} aria-label="Send message">{sending ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}<span className="chat-send-label"> Send</span></button>
             </form>}
@@ -486,12 +510,17 @@ function GroupInfo({ supabase, group, me, isAdmin, people, nameOf, online, onClo
   const [code, setCode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [addId, setAddId] = useState('')
+  const [groupAvatar,setGroupAvatar]=useState('')
+  const [avatarBusy,setAvatarBusy]=useState(false)
   const isOwner = group.created_by === me
 
   const load = useCallback(async () => {
     setLoading(true)
     const { data, error: e } = await supabase.from('ltl_chat_members').select('user_id, role').eq('group_id', group.id)
     if (e) onNotice(friendly(e.message)); else setMembers((data ?? []) as MemberRow[])
+    const groupRes = await supabase.from('ltl_chat_groups').select('avatar_path').eq('id',group.id).maybeSingle()
+    const gp = (groupRes.data as {avatar_path?:string|null}|null)?.avatar_path
+    setGroupAvatar(gp ? supabase.storage.from('ltl-group-avatars').getPublicUrl(gp).data.publicUrl + '?v=' + Date.now() : '')
     if (isOwner && group.visibility === 'private') {
       const res = await supabase.from('ltl_chat_group_codes').select('invite_code').eq('group_id', group.id).maybeSingle()
       setCode((res.data as { invite_code: string } | null)?.invite_code ?? null)
@@ -502,6 +531,15 @@ function GroupInfo({ supabase, group, me, isAdmin, people, nameOf, online, onClo
 
   const candidates = people.filter(p => !members.some(m => m.user_id === p.id))
 
+  async function uploadGroupAvatar(file?:File) {
+    if(!file || !isOwner) return
+    if(!file.type.startsWith('image/') || file.size>5*1024*1024) return onNotice('Choose an image smaller than 5 MB.')
+    setAvatarBusy(true)
+    const path=`${group.id}/group-avatar-${Date.now()}.${file.type==='image/png'?'png':file.type==='image/webp'?'webp':'jpg'}`
+    const {error:upErr}=await supabase.storage.from('ltl-group-avatars').upload(path,file,{contentType:file.type,upsert:true})
+    if(!upErr){const {error:dbErr}=await supabase.from('ltl_chat_groups').update({avatar_path:path}).eq('id',group.id);if(dbErr)onNotice(dbErr.message);else{setGroupAvatar(supabase.storage.from('ltl-group-avatars').getPublicUrl(path).data.publicUrl+'?v='+Date.now());onNotice('Group picture updated.')}}else onNotice(upErr.message)
+    setAvatarBusy(false)
+  }
   async function addMember() {
     if (!addId) return
     const { error: e } = await supabase.rpc('ltl_add_chat_member', { p_group_id: group.id, p_user_id: addId })
@@ -539,6 +577,7 @@ function GroupInfo({ supabase, group, me, isAdmin, people, nameOf, online, onClo
 
   return <div className="chat-info">
     <div className="chat-info-head"><strong>Group info</strong><button className="icon-button" aria-label="Close info" onClick={onClose}><X size={16} /></button></div>
+    <div className="group-avatar-setting">{groupAvatar?<img src={groupAvatar} alt="Group profile"/>:<span><Users size={24}/></span>}{isOwner&&<label className="outline-button chat-mini"><ImagePlus size={14}/>{avatarBusy?'Saving…':'Set group picture'}<input type="file" accept="image/*" hidden disabled={avatarBusy} onChange={e=>{void uploadGroupAvatar(e.target.files?.[0]);e.currentTarget.value=''}}/></label>}</div>
     {group.description && <p className="chat-hint">{group.description}</p>}
     <p className="chat-hint">{group.visibility === 'public' ? '🌍 Public group' : '🔒 Private group'} · {members.length || group.member_count} members</p>
     {isOwner && group.visibility === 'private' && <div className="chat-code">
