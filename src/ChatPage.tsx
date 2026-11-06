@@ -232,7 +232,9 @@ export default function ChatPage({ supabase, user, isAdmin }: ChatPageProps) {
     setSending(true)
     const table = active.kind === 'dm' ? 'ltl_direct_messages' : 'ltl_group_messages'
     const payload = active.kind === 'dm' ? { sender_id: uid, recipient_id: active.id, body: body || '📷 Image', image_path: imagePath || null } : { group_id: active.id, sender_id: uid, body: body || '📷 Image', image_path: imagePath || null }
-    const { data, error: e } = await supabase.from(table).insert(payload).select('*').single()
+    // DM and group messages have different required columns; keep the conditional payload
+    // from being inferred as one incompatible union by Supabase's insert type.
+    const { data, error: e } = await supabase.from(table).insert(payload as any).select('*').single()
     if (e) setNotice(friendly(e.message))
     else { const row = data as ChatMsg; setMessages(prev => (prev.some(m => m.id === row.id) ? prev : [...prev, row])); setDraft('') }
     setSending(false)
