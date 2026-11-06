@@ -537,9 +537,9 @@ function GroupInfo({ supabase, group, me, isAdmin, people, nameOf, online, onClo
     if(!file || !isOwner) return
     if(!file.type.startsWith('image/') || file.size>5*1024*1024) return onNotice('Choose an image smaller than 5 MB.')
     setAvatarBusy(true)
-    const path=`${group.id}/group-avatar-${Date.now()}.${file.type==='image/png'?'png':file.type==='image/webp'?'webp':'jpg'}`
+    const path=`${me}/group-${group.id}-${Date.now()}.${file.type==='image/png'?'png':file.type==='image/webp'?'webp':'jpg'}`
     const {error:upErr}=await supabase.storage.from('ltl-group-avatars').upload(path,file,{contentType:file.type,upsert:false})
-    if(!upErr){const {error:dbErr}=await supabase.from('ltl_chat_groups').update({avatar_path:path}).eq('id',group.id);if(dbErr)onNotice(dbErr.message);else{setGroupAvatar(supabase.storage.from('ltl-group-avatars').getPublicUrl(path).data.publicUrl+'?v='+Date.now());onNotice('Group picture updated.')}}else onNotice(upErr.message)
+    if(!upErr){const {error:dbErr}=await supabase.from('ltl_chat_groups').update({avatar_path:path}).eq('id',group.id);if(dbErr)onNotice('Saving failed: '+dbErr.message);else{setGroupAvatar(supabase.storage.from('ltl-group-avatars').getPublicUrl(path).data.publicUrl+'?v='+Date.now());onNotice('Group picture updated.')}}else onNotice('Upload failed: '+upErr.message)
     setAvatarBusy(false)
   }
   async function addMember() {
